@@ -1,11 +1,11 @@
 -- phpMyAdmin SQL Dump
--- version 5.2.1
+-- version 5.2.0
 -- https://www.phpmyadmin.net/
 --
--- Host: 127.0.0.1
--- Creato il: Set 21, 2025 alle 17:16
--- Versione del server: 10.4.32-MariaDB
--- Versione PHP: 8.2.12
+-- Host: localhost
+-- Creato il: Feb 20, 2026 alle 15:43
+-- Versione del server: 8.0.26
+-- Versione PHP: 8.0.22
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
@@ -18,8 +18,33 @@ SET time_zone = "+00:00";
 /*!40101 SET NAMES utf8mb4 */;
 
 --
--- Database: `shuttlex`
+-- Database: `my_mels`
 --
+DROP DATABASE IF EXISTS `my_mels`;
+CREATE DATABASE IF NOT EXISTS `my_mels` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+USE `my_mels`;
+
+-- --------------------------------------------------------
+
+--
+-- Struttura della tabella `login`
+--
+
+DROP TABLE IF EXISTS `login`;
+CREATE TABLE IF NOT EXISTS `login` (
+  `username` varchar(10) NOT NULL,
+  `password` char(32) NOT NULL,
+  `livello` int UNSIGNED NOT NULL DEFAULT '1' COMMENT '0-Admin, 1-Utente',
+  PRIMARY KEY (`username`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
+-- Dump dei dati per la tabella `login`
+--
+
+INSERT INTO `login` (`username`, `password`, `livello`) VALUES
+('Antonio', '9fd4d64c83796a06b0a89718a95cb16a', 0),
+('utente', '574b0a6aeb410696363eb12882a66f12', 1);
 
 -- --------------------------------------------------------
 
@@ -27,9 +52,11 @@ SET time_zone = "+00:00";
 -- Struttura della tabella `luogo`
 --
 
-CREATE TABLE `luogo` (
-  `id` varchar(3) NOT NULL,
-  `denominazione` text NOT NULL
+DROP TABLE IF EXISTS `luogo`;
+CREATE TABLE IF NOT EXISTS `luogo` (
+  `id` varchar(3) COLLATE utf8mb4_general_ci NOT NULL,
+  `denominazione` text COLLATE utf8mb4_general_ci NOT NULL,
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -44,19 +71,70 @@ INSERT INTO `luogo` (`id`, `denominazione`) VALUES
 ('pol', 'POLIBA'),
 ('stz', 'UNIBA - STAZIONE');
 
+--
+-- Trigger `luogo`
+--
+DROP TRIGGER IF EXISTS `trg_luogo_delete`;
+DELIMITER $$
+CREATE TRIGGER `trg_luogo_delete` AFTER DELETE ON `luogo` FOR EACH ROW BEGIN
+    UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1;
+END
+$$
+DELIMITER ;
+DROP TRIGGER IF EXISTS `trg_luogo_insert`;
+DELIMITER $$
+CREATE TRIGGER `trg_luogo_insert` AFTER INSERT ON `luogo` FOR EACH ROW BEGIN
+    UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1;
+END
+$$
+DELIMITER ;
+DROP TRIGGER IF EXISTS `trg_luogo_update`;
+DELIMITER $$
+CREATE TRIGGER `trg_luogo_update` AFTER UPDATE ON `luogo` FOR EACH ROW BEGIN
+    UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1;
+END
+$$
+DELIMITER ;
+
+-- --------------------------------------------------------
+
+--
+-- Struttura della tabella `modifica`
+--
+
+DROP TABLE IF EXISTS `modifica`;
+CREATE TABLE IF NOT EXISTS `modifica` (
+  `id` int NOT NULL,
+  `ultimaModifica` datetime NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dump dei dati per la tabella `modifica`
+--
+
+INSERT INTO `modifica` (`id`, `ultimaModifica`) VALUES
+(1, '2025-12-11 23:29:28');
+
 -- --------------------------------------------------------
 
 --
 -- Struttura della tabella `orari`
 --
 
-CREATE TABLE `orari` (
-  `id` int(11) NOT NULL,
+DROP TABLE IF EXISTS `orari`;
+CREATE TABLE IF NOT EXISTS `orari` (
+  `id` int NOT NULL AUTO_INCREMENT,
   `orario` time DEFAULT NULL,
-  `tipoGiorno` tinyint(1) NOT NULL DEFAULT 1,
-  `tratta` int(11) UNSIGNED NOT NULL,
-  `idLuogo` varchar(3) NOT NULL DEFAULT 'stz'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `tipoGiorno` tinyint(1) NOT NULL DEFAULT '1',
+  `tratta` int UNSIGNED NOT NULL,
+  `idLuogo` varchar(3) COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'stz',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `orario` (`orario`,`tipoGiorno`),
+  KEY `idLuogo` (`idLuogo`),
+  KEY `tipoGiorno` (`tipoGiorno`,`tratta`),
+  KEY `fk_orari_tratte` (`tratta`,`tipoGiorno`)
+) ENGINE=InnoDB AUTO_INCREMENT=104 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Dump dei dati per la tabella `orari`
@@ -68,7 +146,7 @@ INSERT INTO `orari` (`id`, `orario`, `tipoGiorno`, `tratta`, `idLuogo`) VALUES
 (3, '07:25:00', 0, 1, 'cia'),
 (4, '07:30:00', 0, 1, 'stz'),
 (5, '07:35:00', 0, 1, 'med'),
-(6, '07:40:00', 0, 1, 'med'),
+(6, '07:40:00', 0, 1, 'eco'),
 (7, '08:00:00', 0, 1, 'cxc'),
 (8, '08:00:01', 0, 2, 'cxc'),
 (9, '08:10:00', 0, 2, 'pol'),
@@ -78,7 +156,7 @@ INSERT INTO `orari` (`id`, `orario`, `tipoGiorno`, `tratta`, `idLuogo`) VALUES
 (13, '08:50:00', 0, 3, 'cia'),
 (14, '08:55:00', 0, 3, 'stz'),
 (15, '09:00:00', 0, 3, 'med'),
-(16, '09:10:00', 0, 3, 'med'),
+(16, '09:10:00', 0, 3, 'eco'),
 (17, '09:20:00', 0, 3, 'cxc'),
 (18, '09:30:00', 0, 4, 'cxc'),
 (19, '09:40:00', 0, 4, 'pol'),
@@ -164,16 +242,43 @@ INSERT INTO `orari` (`id`, `orario`, `tipoGiorno`, `tratta`, `idLuogo`) VALUES
 (99, '20:20:00', 1, 5, 'stz'),
 (100, '21:40:00', 1, 6, 'stz');
 
+--
+-- Trigger `orari`
+--
+DROP TRIGGER IF EXISTS `trg_orari_delete`;
+DELIMITER $$
+CREATE TRIGGER `trg_orari_delete` AFTER DELETE ON `orari` FOR EACH ROW BEGIN
+    UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1;
+END
+$$
+DELIMITER ;
+DROP TRIGGER IF EXISTS `trg_orari_insert`;
+DELIMITER $$
+CREATE TRIGGER `trg_orari_insert` AFTER INSERT ON `orari` FOR EACH ROW BEGIN
+    UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1;
+END
+$$
+DELIMITER ;
+DROP TRIGGER IF EXISTS `trg_orari_update`;
+DELIMITER $$
+CREATE TRIGGER `trg_orari_update` AFTER UPDATE ON `orari` FOR EACH ROW BEGIN
+    UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1;
+END
+$$
+DELIMITER ;
+
 -- --------------------------------------------------------
 
 --
 -- Struttura della tabella `tratte`
 --
 
-CREATE TABLE `tratte` (
-  `numero` int(11) UNSIGNED NOT NULL,
-  `tipo` tinyint(1) NOT NULL DEFAULT 1,
-  `note` text DEFAULT NULL
+DROP TABLE IF EXISTS `tratte`;
+CREATE TABLE IF NOT EXISTS `tratte` (
+  `numero` int UNSIGNED NOT NULL,
+  `tipo` tinyint(1) NOT NULL DEFAULT '1',
+  `note` text COLLATE utf8mb4_general_ci,
+  PRIMARY KEY (`numero`,`tipo`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -183,7 +288,7 @@ CREATE TABLE `tratte` (
 INSERT INTO `tratte` (`numero`, `tipo`, `note`) VALUES
 (1, 0, NULL),
 (1, 1, NULL),
-(2, 0, NULL),
+(2, 0, 'Solo POLIBA'),
 (2, 1, NULL),
 (3, 0, NULL),
 (3, 1, NULL),
@@ -196,43 +301,32 @@ INSERT INTO `tratte` (`numero`, `tipo`, `note`) VALUES
 (7, 0, NULL),
 (8, 0, NULL),
 (9, 0, NULL),
-(10, 0, NULL);
+(10, 0, 'Solo STAZIONE');
 
 --
--- Indici per le tabelle scaricate
+-- Trigger `tratte`
 --
-
---
--- Indici per le tabelle `luogo`
---
-ALTER TABLE `luogo`
-  ADD PRIMARY KEY (`id`);
-
---
--- Indici per le tabelle `orari`
---
-ALTER TABLE `orari`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `orario` (`orario`,`tipoGiorno`),
-  ADD KEY `idLuogo` (`idLuogo`),
-  ADD KEY `tipoGiorno` (`tipoGiorno`,`tratta`),
-  ADD KEY `fk_orari_tratte` (`tratta`,`tipoGiorno`);
-
---
--- Indici per le tabelle `tratte`
---
-ALTER TABLE `tratte`
-  ADD PRIMARY KEY (`numero`,`tipo`);
-
---
--- AUTO_INCREMENT per le tabelle scaricate
---
-
---
--- AUTO_INCREMENT per la tabella `orari`
---
-ALTER TABLE `orari`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=101;
+DROP TRIGGER IF EXISTS `trg_tratte_delete`;
+DELIMITER $$
+CREATE TRIGGER `trg_tratte_delete` AFTER DELETE ON `tratte` FOR EACH ROW BEGIN
+    UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1;
+END
+$$
+DELIMITER ;
+DROP TRIGGER IF EXISTS `trg_tratte_insert`;
+DELIMITER $$
+CREATE TRIGGER `trg_tratte_insert` AFTER INSERT ON `tratte` FOR EACH ROW BEGIN
+    UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1;
+END
+$$
+DELIMITER ;
+DROP TRIGGER IF EXISTS `trg_tratte_update`;
+DELIMITER $$
+CREATE TRIGGER `trg_tratte_update` AFTER UPDATE ON `tratte` FOR EACH ROW BEGIN
+    UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1;
+END
+$$
+DELIMITER ;
 
 --
 -- Limiti per le tabelle scaricate
