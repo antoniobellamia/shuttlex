@@ -30,7 +30,6 @@ USE `my_mels`;
 -- Struttura della tabella `login`
 --
 
-DROP TABLE IF EXISTS `login`;
 CREATE TABLE IF NOT EXISTS `login` (
   `username` varchar(10) NOT NULL,
   `password` char(32) NOT NULL,
@@ -38,13 +37,6 @@ CREATE TABLE IF NOT EXISTS `login` (
   PRIMARY KEY (`username`)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---
--- Dump dei dati per la tabella `login`
---
-
-INSERT INTO `login` (`username`, `password`, `livello`) VALUES
-('Antonio', '9fd4d64c83796a06b0a89718a95cb16a', 0),
-('utente', '574b0a6aeb410696363eb12882a66f12', 1);
 
 -- --------------------------------------------------------
 
