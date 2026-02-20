@@ -1,6 +1,6 @@
 <?php
 // Parametro obbligatorio
-if(!isset($_GET['fermata'])) die("Parametro 'fermata' obbligatorio");
+if(!isset($_GET['fermata'])) die("<h1>Errore 400 - Richiesta Non Valida</h1><p>Il parametro 'fermata' è obbligatorio. Controllare il link di provenienza.</p>");
 
 $fermata = $_GET['fermata'];
 $tipoGiorno = isset($_GET['fest']) ? (int)$_GET['fest'] : (date('N') < 6 ? 0 : 1);
@@ -15,6 +15,9 @@ $queryTratte = "
     WHERE tipoGiorno = $tipoGiorno AND idLuogo = '$fermata'
 ";
 $tratteResult = $sxConn->query($queryTratte);
+
+// 🚩 INIZIALIZZAZIONE CONTATORE/FLAG 
+$tratteTrovate = 0;
 
 while($trattaRow = $tratteResult->fetch_assoc()) {
     $tratta = $trattaRow['tratta'];
@@ -38,7 +41,9 @@ while($trattaRow = $tratteResult->fetch_assoc()) {
         ORDER BY orario ASC LIMIT 1
     ";
     $startResult = $sxConn->query($queryStart);
-    if($startResult->num_rows == 0) continue;
+    
+    // Se non c'è una corsa successiva all'ora richiesta, saltiamo la tratta
+    if($startResult->num_rows == 0) continue; 
     $startOrario = $startResult->fetch_assoc()['orario'];
 
     // Recuperiamo tutte le fermate della tratta a partire dalla fermata selezionata
@@ -53,13 +58,18 @@ while($trattaRow = $tratteResult->fetch_assoc()) {
     ";
     $resultOrari = $sxConn->query($queryOrari);
 
+    // Se la tratta ha meno di due fermate (es. solo la fermata di partenza), la saltiamo
     if($resultOrari->num_rows < 2) continue;
+
+    // 🏆 A questo punto, una tratta è stata trovata e sta per essere visualizzata
+    $tratteTrovate++; 
 
     $fermate = [];
     while($row = $resultOrari->fetch_assoc()){
         $fermate[] = $row;
     }
 
+    // --- Inizio Output HTML per la tratta ---
     echo '<div class="w3-container">';
     echo '  <div class="w3-panel w3-card-4">';
     echo "    <h3 class='w3-center c-primary'>Tratta $tratta$note</h3>";
@@ -88,7 +98,22 @@ while($trattaRow = $tratteResult->fetch_assoc()) {
     echo "    <h4 class='w3-center c-primary'></h4>"; 
     echo "  </div>";
     echo "</div>";
+    // --- Fine Output HTML per la tratta ---
+}
+
+// 🛑 CONTROLLO FINALE E MESSAGGIO DI AVVISO
+if ($tratteTrovate === 0) {
+    $giorno = ($tipoGiorno === 1) ? 'festivo' : 'feriale';
+    
+    // Inizializza il pannello con le stesse classi delle tratte,
+    // usando un colore che indichi l'assenza di risultati (es. w3-light-gray o w3-red)
+    echo '<div class="w3-container">';
+    echo '  <div class="w3-panel w3-card-4 w3-red">'; // Ho usato w3-red per maggiore enfasi
+    echo '    <h3 class="w3-center">Nessuna Tratta Trovata</h3>';
+    echo "    <p class='w3-center'>Non ci sono corse disponibili per la fermata selezionata a partire dalle ore <b>$ora</b> per un giorno <b>$giorno</b>.</p>";
+    echo '  </div>';
+    echo '</div>';
 }
 
 include_once 'footer.php'; 
-?>  
+?>

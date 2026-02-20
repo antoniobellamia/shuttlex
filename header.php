@@ -1,7 +1,6 @@
 <?php
 include_once 'database.php'; // definisce $sxConn
 
-
 // Parametri comuni
 $tipoGiorno = isset($tipoGiorno) ? $tipoGiorno : (isset($_GET['fest']) ? (int)$_GET['fest'] : (date('N') < 6 ? 0 : 1));
 $oraVisualizzata = isset($ora) ? $ora : date('H:i:s');
@@ -25,6 +24,7 @@ if ($fermataSelezionata) {
 
 <head>
     <title>ShuttleX</title>
+    <meta name="robots" content="noindex, nofollow">
     <?php include_once 'styles/header-include.php' ?>
 </head>
 
@@ -32,7 +32,7 @@ if ($fermataSelezionata) {
     <nav>
         <div class="pure-g">
             <div class="pure-u-md-1-2 pure-u-5-24">
-                <a href="index.php">
+                <a href="home.php">
                     <h2 class="c-margin-not">SX</h2>
                 </a>
             </div>
@@ -102,3 +102,9 @@ if ($fermataSelezionata) {
 
 
     </nav>
+  
+ <?php   
+    // INCLUSIONE DEL FILE DI MANUTENZIONE
+	include_once 'manutenzione.php'; 
+	// Se $isManutenzione è true, lo script si fermerà qui e mostrerà l'avviso.
+?>

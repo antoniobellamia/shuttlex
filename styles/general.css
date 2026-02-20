@@ -29,10 +29,11 @@ a:visited {
 
 button.cbutt{
     margin-top: 0 !important; 
+    font-size:75% !important;
 }
 
 button.sec{
-    margin-left: 0.4rem !important;
+    margin-left: 0.2rem !important;
 }
 
 .c-primary{
@@ -44,4 +45,8 @@ button.sec{
     color: white;
     text-align: center;
     overflow-wrap: break-word;
+}
+
+.c-margin-not{
+margin-bottom: 0 !important;
 }
