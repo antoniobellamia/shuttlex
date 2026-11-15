@@ -1,13 +1,12 @@
 <?php
-include_once 'database.php';
-include_once 'auth.php';
+include_once __DIR__ . '/auth.php';
 requireAdmin();
 
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
 }
 
-// --- ENDPOINT AJAX PER SALVATAGGIO INTERATTIVO INLINE ---
+// --- ENDPOINT AJAX PER MODIFICHE INLINE ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['ajax'] ?? '') === '1') {
     header('Content-Type: application/json; charset=utf-8');
 
@@ -39,26 +38,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['ajax'] ?? '') === '1') {
             $sxConn->query("UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1");
             echo json_encode(['ok' => true]);
         } else {
-            echo json_encode(['ok' => false, 'error' => 'Orario/fermata già presente']);
+            echo json_encode(['ok' => false, 'error' => 'Errore salvataggio']);
         }
         exit;
     }
 
-    if ($azione === 'update_nota') {
-        $tratta = (int)($_POST['tratta'] ?? 0);
-        $tipo = (int)($_POST['tipo'] ?? 0);
+    if ($azione === 'move_sequenza') {
+        $orarioId = (int)($_POST['orario_id'] ?? 0);
+        $trattaId = (int)($_POST['tratta_id'] ?? 0);
+        $dir = ($_POST['direzione'] ?? '') === 'up' ? -1 : 1;
+
+        $curr = $sxConn->query("SELECT id, sequenza FROM orari WHERE id = {$orarioId} AND tratta_id = {$trattaId}")->fetch_assoc();
+        if ($curr) {
+            $seqA = (int)$curr['sequenza'];
+            $op = $dir < 0 ? "< {$seqA} ORDER BY sequenza DESC" : "> {$seqA} ORDER BY sequenza ASC";
+            $adj = $sxConn->query("SELECT id, sequenza FROM orari WHERE tratta_id = {$trattaId} AND sequenza {$op} LIMIT 1")->fetch_assoc();
+
+            if ($adj) {
+                $idB = (int)$adj['id'];
+                $seqB = (int)$adj['sequenza'];
+                $sxConn->begin_transaction();
+                $sxConn->query("UPDATE orari SET sequenza = 0 WHERE id = {$orarioId}");
+                $sxConn->query("UPDATE orari SET sequenza = {$seqA} WHERE id = {$idB}");
+                $sxConn->query("UPDATE orari SET sequenza = {$seqB} WHERE id = {$orarioId}");
+                $sxConn->commit();
+                $sxConn->query("UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1");
+                echo json_encode(['ok' => true, 'swapped_with' => $idB]);
+                exit;
+            }
+        }
+        echo json_encode(['ok' => false, 'error' => 'Impossibile spostare']);
+        exit;
+    }
+
+    if ($azione === 'update_tratta_meta') {
+        $trattaId = (int)($_POST['tratta_id'] ?? 0);
+        $giorni = (int)($_POST['giorni_attivi'] ?? 0);
         $nota = trim($_POST['note'] ?? '');
         $notaVal = ($nota === '') ? null : $nota;
 
-        $stmt = $sxConn->prepare("UPDATE tratte SET note = ? WHERE numero = ? AND tipo = ?");
-        $stmt->bind_param("sii", $notaVal, $tratta, $tipo);
+        $stmt = $sxConn->prepare("UPDATE tratte SET giorni_attivi = ?, note = ? WHERE id = ?");
+        $stmt->bind_param("isi", $giorni, $notaVal, $trattaId);
         $ok = $stmt->execute();
         $stmt->close();
 
         if ($ok) {
             $sxConn->query("UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1");
         }
-        echo json_encode(['ok' => $ok]);
+        echo json_encode(['ok' => $ok, 'warning' => $giorni === 0 ? 'Nessun giorno attivo' : '']);
         exit;
     }
 
@@ -80,13 +107,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['ajax'] ?? '') === '1') {
     exit;
 }
 
-// --- GESTIONE FORM TRADIZIONALI ---
+// --- AZIONI FORM ---
 $feedback = '';
 $feedbackType = 'alert-success';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'] ?? '')) {
-        die("Token di sicurezza non valido.");
+        die("Token CSRF non valido.");
     }
 
     $azione = $_POST['azione'] ?? '';
@@ -103,66 +130,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $feedback = "Impostazioni di manutenzione aggiornate.";
     }
 
-    if ($azione === 'aggiungi_orario') {
-        $tratta = (int)$_POST['tratta'];
-        $tipo = (int)$_POST['tipoGiorno'];
+    if ($azione === 'aggiungi_fermata') {
+        $trattaId = (int)$_POST['tratta_id'];
         $luogo = $_POST['idLuogo'];
         $orario = $_POST['orario'] . ':00';
 
-        $insT = $sxConn->prepare("INSERT IGNORE INTO tratte (numero, tipo, note) VALUES (?, ?, NULL)");
-        $insT->bind_param("ii", $tratta, $tipo);
-        $insT->execute();
-        $insT->close();
+        $resMax = $sxConn->query("SELECT COALESCE(MAX(sequenza), 0) + 1 AS next_seq FROM orari WHERE tratta_id = {$trattaId}");
+        $nextSeq = (int)$resMax->fetch_assoc()['next_seq'];
 
-        $stmt = $sxConn->prepare("INSERT INTO orari (orario, tipoGiorno, tratta, idLuogo) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param("siis", $orario, $tipo, $tratta, $luogo);
+        $stmt = $sxConn->prepare("INSERT INTO orari (tratta_id, sequenza, idLuogo, orario) VALUES (?, ?, ?, ?)");
+        $stmt->bind_param("iiss", $trattaId, $nextSeq, $luogo, $orario);
         if ($stmt->execute()) {
             $sxConn->query("UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1");
-            $feedback = "Fermata aggiunta alla Tratta #{$tratta}.";
+            $feedback = "Fermata aggiunta.";
         } else {
-            $feedback = "Errore: fermata/orario già presente su questa tratta.";
+            $feedback = "Errore nell'inserimento della fermata.";
             $feedbackType = 'alert-danger';
         }
         $stmt->close();
     }
 
-    if ($azione === 'duplica_tratta') {
-        $srcTratta = (int)$_POST['src_tratta'];
-        $srcTipo = (int)$_POST['src_tipo'];
-        $dstTratta = (int)$_POST['dst_tratta'];
-        $dstTipo = (int)$_POST['dst_tipo'];
-        $offsetMin = (int)($_POST['offset_minuti'] ?? 0);
+    if ($azione === 'crea_tratta') {
+        $numero = (int)$_POST['numero'];
+        $giorni = 0;
+        if (!empty($_POST['giorni'])) {
+            foreach ($_POST['giorni'] as $g) {
+                $giorni |= (int)$g;
+            }
+        }
+        if ($giorni === 0) $giorni = 31;
+        $nota = trim($_POST['note'] ?? '');
+        $notaVal = $nota === '' ? null : $nota;
 
-        $insT = $sxConn->prepare("INSERT IGNORE INTO tratte (numero, tipo, note) VALUES (?, ?, NULL)");
-        $insT->bind_param("ii", $dstTratta, $dstTipo);
-        $insT->execute();
-        $insT->close();
-
-        $stmt = $sxConn->prepare("
-            INSERT IGNORE INTO orari (orario, tipoGiorno, tratta, idLuogo)
-            SELECT ADDTIME(orario, SEC_TO_TIME(? * 60)), ?, ?, idLuogo
-            FROM orari
-            WHERE tratta = ? AND tipoGiorno = ?
-        ");
-        $stmt->bind_param("iiiii", $offsetMin, $dstTipo, $dstTratta, $srcTratta, $srcTipo);
+        $stmt = $sxConn->prepare("INSERT INTO tratte (numero, giorni_attivi, note) VALUES (?, ?, ?)");
+        $stmt->bind_param("iis", $numero, $giorni, $notaVal);
         $stmt->execute();
-        $copiate = $stmt->affected_rows;
+        $newTrattaId = $stmt->insert_id;
         $stmt->close();
 
+        $copiaDa = (int)($_POST['copia_da'] ?? 0);
+        $offset = (int)($_POST['offset_minuti'] ?? 0);
+        if ($copiaDa > 0 && $newTrattaId > 0) {
+            $stmtC = $sxConn->prepare("
+                INSERT INTO orari (tratta_id, sequenza, idLuogo, orario)
+                SELECT ?, sequenza, idLuogo, ADDTIME(orario, SEC_TO_TIME(? * 60))
+                FROM orari WHERE tratta_id = ? ORDER BY sequenza ASC
+            ");
+            $stmtC->bind_param("iii", $newTrattaId, $offset, $copiaDa);
+            $stmtC->execute();
+            $stmtC->close();
+        }
+
         $sxConn->query("UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1");
-        $feedback = "Duplicate {$copiate} fermate nella Tratta #{$dstTratta}.";
+        $feedback = "Tratta #{$numero} creata.";
     }
 
     if ($azione === 'elimina_tratta') {
-        $tratta = (int)$_POST['tratta'];
-        $tipo = (int)$_POST['tipo'];
-        $stmt = $sxConn->prepare("DELETE FROM tratte WHERE numero = ? AND tipo = ?");
-        $stmt->bind_param("ii", $tratta, $tipo);
+        $trattaId = (int)$_POST['tratta_id'];
+        $stmt = $sxConn->prepare("DELETE FROM tratte WHERE id = ?");
+        $stmt->bind_param("i", $trattaId);
         $stmt->execute();
         $stmt->close();
-
         $sxConn->query("UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1");
-        $feedback = "Intera Tratta #{$tratta} eliminata.";
+        $feedback = "Tratta eliminata.";
     }
 
     if ($azione === 'salva_utente') {
@@ -181,63 +211,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+function descriviGiorni(int $mask): string {
+    $parti = [];
+    if (($mask & 31) === 31) $parti[] = 'Lun-Ven';
+    elseif ($mask & 31) $parti[] = 'Feriali parziali';
+    if ($mask & 32) $parti[] = 'Sab';
+    if ($mask & 64) $parti[] = 'Dom';
+    return $parti ? implode(', ', $parti) : 'Disattiva';
+}
+
 $imp = $sxConn->query("SELECT * FROM impostazioni WHERE id = 1")->fetch_assoc();
-$luoghiRes = $sxConn->query("SELECT id, denominazione FROM luogo ORDER BY denominazione ASC");
-$luoghi = $luoghiRes ? $luoghiRes->fetch_all(MYSQLI_ASSOC) : [];
+$luoghi = $sxConn->query("SELECT id, denominazione FROM luogo ORDER BY denominazione ASC")->fetch_all(MYSQLI_ASSOC);
+$tratte = $sxConn->query("SELECT id, numero, giorni_attivi, note FROM tratte ORDER BY numero ASC, id ASC")->fetch_all(MYSQLI_ASSOC);
 
-$filtroTipo = isset($_GET['tipo']) ? (int)$_GET['tipo'] : 0;
-
-$tratteMap = [];
-$resT = $sxConn->prepare("SELECT numero, tipo, note FROM tratte WHERE tipo = ? ORDER BY numero ASC");
-$resT->bind_param("i", $filtroTipo);
-$resT->execute();
-$rT = $resT->get_result();
-while ($row = $rT->fetch_assoc()) {
-    $tratteMap[(int)$row['numero']] = [
-        'note' => $row['note'] ?? '',
-        'fermate' => []
-    ];
+$orariByTratta = [];
+$resO = $sxConn->query("SELECT id, tratta_id, sequenza, idLuogo, orario FROM orari ORDER BY tratta_id ASC, sequenza ASC");
+while ($o = $resO->fetch_assoc()) {
+    $orariByTratta[(int)$o['tratta_id']][] = $o;
 }
-$resT->close();
-
-$resO = $sxConn->prepare("
-    SELECT O.id, O.tratta, O.orario, O.idLuogo, L.denominazione
-    FROM orari O
-    JOIN luogo L ON L.id = O.idLuogo
-    WHERE O.tipoGiorno = ?
-    ORDER BY O.tratta ASC, O.orario ASC
-");
-$resO->bind_param("i", $filtroTipo);
-$resO->execute();
-$rO = $resO->get_result();
-while ($row = $rO->fetch_assoc()) {
-    $num = (int)$row['tratta'];
-    if (!isset($tratteMap[$num])) {
-        $tratteMap[$num] = ['note' => '', 'fermate' => []];
-    }
-    $tratteMap[$num]['fermate'][] = $row;
-}
-$resO->close();
-ksort($tratteMap);
 ?>
 <!DOCTYPE html>
 <html lang="it">
 <head>
     <title>Admin - ShuttleX</title>
-    <?php include_once 'styles/header-include.php'; ?>
+    <?php include_once __DIR__ . '/styles/header-include.php'; ?>
 </head>
 <body>
-    <header class="app-header">
-        <div class="container">
-            <div class="topbar" style="margin-bottom: 0;">
-                <a href="home.php" class="brand-logo">
-                    <i class="fa-solid fa-sliders" aria-hidden="true"></i>
-                    <span>SX <span class="sub">Pannello Admin</span></span>
-                </a>
-                <a href="home.php" class="btn btn-chip btn-sm">
-                    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Torna all'App
-                </a>
-            </div>
+    <header class="app-topbar">
+        <div class="container topbar-inner">
+            <a href="home.php" class="brand-logo">
+                <span class="brand-badge"><i class="fa-solid fa-sliders" aria-hidden="true"></i> SX</span>
+                <span>Admin</span>
+            </a>
+            <a href="home.php" class="btn btn-chip btn-sm">
+                <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Torna all'App
+            </a>
         </div>
     </header>
 
@@ -248,104 +256,110 @@ ksort($tratteMap);
             </div>
         <?php endif; ?>
 
-        <!-- SELETTORE GIORNO E DUPLICAZIONE -->
+        <!-- NUOVA TRATTA / DUPLICA -->
         <section class="card">
-            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px;">
-                <div style="display: flex; gap: 8px;">
-                    <a href="admin.php?tipo=0" class="btn btn-sm <?= $filtroTipo === 0 ? 'btn-primary' : 'btn-chip' ?>">
-                        Feriale
-                    </a>
-                    <a href="admin.php?tipo=1" class="btn btn-sm <?= $filtroTipo === 1 ? 'btn-primary' : 'btn-chip' ?>">
-                        Festivo
-                    </a>
-                </div>
-                <button type="button"
-                        onclick="document.getElementById('boxDuplica').hidden = !document.getElementById('boxDuplica').hidden"
-                        class="btn btn-chip btn-sm">
-                    <i class="fa-solid fa-copy" aria-hidden="true"></i> Duplica Tratta
-                </button>
-            </div>
+            <h2 style="margin: 0 0 12px; font-size: 1.05rem; color: var(--primary);">
+                <i class="fa-solid fa-plus-circle" aria-hidden="true"></i> Nuova Tratta (o Duplica Esistente)
+            </h2>
+            <form method="post">
+                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
+                <input type="hidden" name="azione" value="crea_tratta">
 
-            <div id="boxDuplica" hidden style="margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);">
-                <form method="post" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px;">
-                    <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
-                    <input type="hidden" name="azione" value="duplica_tratta">
-                    <input type="hidden" name="src_tipo" value="<?= $filtroTipo ?>">
-
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 10px;">
                     <div class="field-group">
-                        <label class="field-label">Copia da Tratta N°</label>
-                        <input class="form-control" type="number" name="src_tratta" min="1" required value="1">
+                        <label class="field-label">N° Tratta</label>
+                        <input class="form-control" type="number" name="numero" min="1" required value="<?= count($tratte) + 1 ?>">
                     </div>
                     <div class="field-group">
-                        <label class="field-label">Nuova Tratta N°</label>
-                        <input class="form-control" type="number" name="dst_tratta" min="1" required value="<?= count($tratteMap) + 1 ?>">
-                    </div>
-                    <div class="field-group">
-                        <label class="field-label">Giorno Destinazione</label>
-                        <select class="form-control" name="dst_tipo">
-                            <option value="0" <?= $filtroTipo === 0 ? 'selected' : '' ?>>Feriale</option>
-                            <option value="1" <?= $filtroTipo === 1 ? 'selected' : '' ?>>Festivo</option>
+                        <label class="field-label">Copia fermate da (opz.)</label>
+                        <select class="form-control" name="copia_da">
+                            <option value="0">-- Vuota --</option>
+                            <?php foreach ($tratte as $t): ?>
+                                <option value="<?= (int)$t['id'] ?>">
+                                    Tratta #<?= (int)$t['numero'] ?> (<?= descriviGiorni((int)$t['giorni_attivi']) ?>)
+                                </option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="field-group">
                         <label class="field-label">Sposta orari (min)</label>
                         <input class="form-control" type="number" name="offset_minuti" value="0">
                     </div>
-                    <div class="field-group" style="justify-content: flex-end;">
-                        <button type="submit" class="btn btn-primary">Duplica</button>
+                    <div class="field-group">
+                        <label class="field-label">Nota (opzionale)</label>
+                        <input class="form-control" type="text" name="note" placeholder="es. Solo POLIBA">
                     </div>
-                </form>
-            </div>
+                </div>
+
+                <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.9rem;">
+                        <label><input type="checkbox" name="giorni[]" value="31" checked> Lun–Ven</label>
+                        <label><input type="checkbox" name="giorni[]" value="32"> Sabato</label>
+                        <label><input type="checkbox" name="giorni[]" value="64"> Domenica</label>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm">Crea Tratta</button>
+                </div>
+            </form>
         </section>
 
-        <!-- EDITOR INTERATTIVO TRATTE -->
-        <?php foreach ($tratteMap as $numTratta => $dati): ?>
-            <article class="card" id="card-tratta-<?= $numTratta ?>">
+        <!-- EDITOR INTERATTIVO PER OGNI TRATTA -->
+        <?php foreach ($tratte as $t):
+            $tid = (int)$t['id'];
+            $g = (int)$t['giorni_attivi'];
+            $fermate = $orariByTratta[$tid] ?? [];
+        ?>
+            <article class="card" id="tratta-card-<?= $tid ?>">
                 <div class="tratta-header">
                     <h2 class="tratta-title">
-                        <span>Tratta #<?= $numTratta ?></span>
-                        <span id="nota-status-<?= $numTratta ?>" class="status-pill" aria-live="polite"></span>
+                        <span>Tratta #<?= (int)$t['numero'] ?></span>
+                        <span id="meta-status-<?= $tid ?>" class="status-pill" aria-live="polite"></span>
                     </h2>
 
-                    <div style="display: flex; gap: 8px; flex: 1 1 260px; justify-content: flex-end;">
-                        <input type="text"
-                               class="form-control"
-                               style="min-height: 38px; padding: 6px 10px;"
-                               aria-label="Nota tratta <?= $numTratta ?>"
-                               value="<?= htmlspecialchars($dati['note']) ?>"
-                               placeholder="Nota (es. Solo POLIBA)..."
-                               onchange="salvaNota(<?= $numTratta ?>, <?= $filtroTipo ?>, this.value)">
+                    <form method="post" onsubmit="return confirm('Eliminare definitivamente questa tratta?');">
+                        <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
+                        <input type="hidden" name="azione" value="elimina_tratta">
+                        <input type="hidden" name="tratta_id" value="<?= $tid ?>">
+                        <button type="submit" class="btn btn-danger btn-sm" aria-label="Elimina tratta">
+                            <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+                        </button>
+                    </form>
+                </div>
 
-                        <form method="post" onsubmit="return confirm('Eliminare l\'intera Tratta #<?= $numTratta ?>?');">
-                            <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
-                            <input type="hidden" name="azione" value="elimina_tratta">
-                            <input type="hidden" name="tratta" value="<?= $numTratta ?>">
-                            <input type="hidden" name="tipo" value="<?= $filtroTipo ?>">
-                            <button type="submit" class="btn btn-danger btn-sm" aria-label="Elimina intera tratta <?= $numTratta ?>">
-                                <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
-                            </button>
-                        </form>
-                    </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); font-size: 0.88rem;">
+                    <label><input type="checkbox" class="day-cb-<?= $tid ?>" value="31" <?= ($g & 31) === 31 ? 'checked' : '' ?> onchange="salvaMetaTratta(<?= $tid ?>)"> Lun–Ven</label>
+                    <label><input type="checkbox" class="day-cb-<?= $tid ?>" value="32" <?= ($g & 32) ? 'checked' : '' ?> onchange="salvaMetaTratta(<?= $tid ?>)"> Sabato</label>
+                    <label><input type="checkbox" class="day-cb-<?= $tid ?>" value="64" <?= ($g & 64) ? 'checked' : '' ?> onchange="salvaMetaTratta(<?= $tid ?>)"> Domenica</label>
+
+                    <input type="text"
+                           id="nota-<?= $tid ?>"
+                           class="form-control"
+                           style="min-height: 36px; padding: 4px 10px; flex: 1 1 180px;"
+                           value="<?= htmlspecialchars($t['note'] ?? '') ?>"
+                           placeholder="Nota tratta..."
+                           onchange="salvaMetaTratta(<?= $tid ?>)">
                 </div>
 
                 <div class="table-wrap">
                     <table class="data-table">
                         <thead>
                             <tr>
+                                <th style="width: 68px;">Ordine</th>
                                 <th>Fermata</th>
-                                <th style="width: 120px;">Orario</th>
-                                <th style="width: 110px; text-align: right;">Azioni</th>
+                                <th style="width: 112px;">Orario</th>
+                                <th style="width: 90px; text-align: right;">Azioni</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            <?php foreach ($dati['fermate'] as $f): ?>
-                                <tr id="row-orario-<?= (int)$f['id'] ?>">
+                        <tbody id="tbody-tratta-<?= $tid ?>">
+                            <?php foreach ($fermate as $f):
+                                $oid = (int)$f['id'];
+                            ?>
+                                <tr id="row-orario-<?= $oid ?>">
+                                    <td style="white-space: nowrap;">
+                                        <button type="button" onclick="spostaRiga(<?= $tid ?>, <?= $oid ?>, 'up')" class="btn btn-chip btn-sm" style="padding: 2px 7px; min-height: 30px;" title="Sposta su">↑</button>
+                                        <button type="button" onclick="spostaRiga(<?= $tid ?>, <?= $oid ?>, 'down')" class="btn btn-chip btn-sm" style="padding: 2px 7px; min-height: 30px;" title="Sposta giù">↓</button>
+                                    </td>
                                     <td>
-                                        <select class="form-control"
-                                                style="min-height: 40px; padding: 6px 10px;"
-                                                aria-label="Fermata"
-                                                id="luogo-<?= (int)$f['id'] ?>"
-                                                onchange="salvaRigaOrario(<?= (int)$f['id'] ?>)">
+                                        <select class="form-control" style="min-height: 38px; padding: 4px 8px;" id="luogo-<?= $oid ?>" onchange="salvaRigaOrario(<?= $oid ?>)">
                                             <?php foreach ($luoghi as $l): ?>
                                                 <option value="<?= htmlspecialchars($l['id']) ?>" <?= $f['idLuogo'] === $l['id'] ? 'selected' : '' ?>>
                                                     <?= htmlspecialchars($l['denominazione']) ?>
@@ -354,21 +368,12 @@ ksort($tratteMap);
                                         </select>
                                     </td>
                                     <td>
-                                        <input type="time"
-                                               class="form-control"
-                                               style="min-height: 40px; padding: 6px 8px;"
-                                               aria-label="Orario"
-                                               id="ora-<?= (int)$f['id'] ?>"
-                                               value="<?= substr($f['orario'], 0, 5) ?>"
-                                               onchange="salvaRigaOrario(<?= (int)$f['id'] ?>)">
+                                        <input type="time" class="form-control" style="min-height: 38px; padding: 4px 8px;" id="ora-<?= $oid ?>" value="<?= substr($f['orario'], 0, 5) ?>" onchange="salvaRigaOrario(<?= $oid ?>)">
                                     </td>
                                     <td style="text-align: right; white-space: nowrap;">
-                                        <span id="status-<?= (int)$f['id'] ?>" class="status-pill" aria-live="polite"></span>
-                                        <button type="button"
-                                                onclick="eliminaRigaOrario(<?= (int)$f['id'] ?>)"
-                                                class="btn btn-danger btn-sm"
-                                                aria-label="Elimina fermata">
-                                            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                                        <span id="status-<?= $oid ?>" class="status-pill"></span>
+                                        <button type="button" onclick="eliminaRigaOrario(<?= $oid ?>)" class="btn btn-danger btn-sm" style="min-height: 32px; padding: 2px 8px;" title="Rimuovi">
+                                            <i class="fa-solid fa-xmark"></i>
                                         </button>
                                     </td>
                                 </tr>
@@ -377,77 +382,42 @@ ksort($tratteMap);
                     </table>
                 </div>
 
-                <!-- AGGIUNGI FERMATA IN CODA -->
-                <form method="post" style="display: grid; grid-template-columns: 1fr 120px auto; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border);">
+                <form method="post" class="admin-add-row">
                     <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
-                    <input type="hidden" name="azione" value="aggiungi_orario">
-                    <input type="hidden" name="tipoGiorno" value="<?= $filtroTipo ?>">
-                    <input type="hidden" name="tratta" value="<?= $numTratta ?>">
+                    <input type="hidden" name="azione" value="aggiungi_fermata">
+                    <input type="hidden" name="tratta_id" value="<?= $tid ?>">
 
-                    <select class="form-control" style="min-height: 40px;" name="idLuogo" aria-label="Nuova fermata" required>
+                    <select class="form-control" style="min-height: 38px;" name="idLuogo" required>
                         <?php foreach ($luoghi as $l): ?>
                             <option value="<?= htmlspecialchars($l['id']) ?>"><?= htmlspecialchars($l['denominazione']) ?></option>
                         <?php endforeach; ?>
                     </select>
-                    <input class="form-control" style="min-height: 40px;" type="time" name="orario" aria-label="Orario nuova fermata" required>
+                    <input class="form-control" style="min-height: 38px;" type="time" name="orario" required>
                     <button type="submit" class="btn btn-primary btn-sm">
-                        <i class="fa-solid fa-plus" aria-hidden="true"></i> Aggiungi
+                        <i class="fa-solid fa-plus"></i> Aggiungi
                     </button>
                 </form>
             </article>
         <?php endforeach; ?>
 
-        <!-- CREA NUOVA TRATTA -->
-        <section class="card">
-            <h2 style="margin: 0 0 12px; font-size: 1.05rem; color: var(--brand-dark);">
-                <i class="fa-solid fa-plus-circle" aria-hidden="true"></i> Crea Nuova Tratta
-            </h2>
-            <form method="post" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px;">
-                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
-                <input type="hidden" name="azione" value="aggiungi_orario">
-                <input type="hidden" name="tipoGiorno" value="<?= $filtroTipo ?>">
-
-                <div class="field-group">
-                    <label class="field-label">N° Tratta</label>
-                    <input class="form-control" type="number" name="tratta" min="1" max="99" required value="<?= count($tratteMap) + 1 ?>">
-                </div>
-                <div class="field-group">
-                    <label class="field-label">Prima Fermata</label>
-                    <select class="form-control" name="idLuogo" required>
-                        <?php foreach ($luoghi as $l): ?>
-                            <option value="<?= htmlspecialchars($l['id']) ?>"><?= htmlspecialchars($l['denominazione']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="field-group">
-                    <label class="field-label">Orario</label>
-                    <input class="form-control" type="time" name="orario" required>
-                </div>
-                <div class="field-group" style="justify-content: flex-end;">
-                    <button type="submit" class="btn btn-primary">Crea Tratta</button>
-                </div>
-            </form>
-        </section>
-
         <!-- MANUTENZIONE & UTENTI -->
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
             <section class="card" style="margin-bottom: 0;">
-                <h2 style="margin: 0 0 12px; font-size: 1.05rem; color: var(--brand-dark);">
-                    <i class="fa-solid fa-wrench" aria-hidden="true"></i> Manutenzione
+                <h2 style="margin: 0 0 12px; font-size: 1.05rem; color: var(--primary);">
+                    <i class="fa-solid fa-wrench"></i> Manutenzione
                 </h2>
                 <form method="post">
                     <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
                     <input type="hidden" name="azione" value="manutenzione">
-                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; min-height: 36px; cursor: pointer;">
-                        <input type="checkbox" name="manutenzione_attiva" <?= !empty($imp['manutenzione_attiva']) ? 'checked' : '' ?> style="width: 20px; height: 20px;">
+                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                        <input type="checkbox" name="manutenzione_attiva" <?= !empty($imp['manutenzione_attiva']) ? 'checked' : '' ?> style="width: 18px; height: 18px;">
                         Mostra banner avviso
                     </label>
-                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; min-height: 36px; cursor: pointer;">
-                        <input type="checkbox" name="manutenzione_bloccata" <?= !empty($imp['manutenzione_bloccata']) ? 'checked' : '' ?> style="width: 20px; height: 20px;">
+                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                        <input type="checkbox" name="manutenzione_bloccata" <?= !empty($imp['manutenzione_bloccata']) ? 'checked' : '' ?> style="width: 18px; height: 18px;">
                         Blocca consultazione orari
                     </label>
                     <div class="field-group" style="margin-bottom: 12px;">
-                        <label class="field-label">Messaggio banner</label>
                         <input class="form-control" type="text" name="manutenzione_messaggio" value="<?= htmlspecialchars($imp['manutenzione_messaggio'] ?? '') ?>">
                     </div>
                     <button type="submit" class="btn btn-primary" style="width: 100%;">Salva Stato</button>
@@ -455,22 +425,19 @@ ksort($tratteMap);
             </section>
 
             <section class="card" style="margin-bottom: 0;">
-                <h2 style="margin: 0 0 12px; font-size: 1.05rem; color: var(--brand-dark);">
-                    <i class="fa-solid fa-users" aria-hidden="true"></i> Gestione Utenti
+                <h2 style="margin: 0 0 12px; font-size: 1.05rem; color: var(--primary);">
+                    <i class="fa-solid fa-users"></i> Utenti
                 </h2>
                 <form method="post">
                     <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
                     <input type="hidden" name="azione" value="salva_utente">
                     <div class="field-group" style="margin-bottom: 10px;">
-                        <label class="field-label">Username</label>
-                        <input class="form-control" type="text" name="new_username" required placeholder="es. mario">
+                        <input class="form-control" type="text" name="new_username" required placeholder="Username">
                     </div>
                     <div class="field-group" style="margin-bottom: 10px;">
-                        <label class="field-label">Password</label>
-                        <input class="form-control" type="password" name="new_password" required placeholder="Nuova password">
+                        <input class="form-control" type="password" name="new_password" required placeholder="Password">
                     </div>
                     <div class="field-group" style="margin-bottom: 12px;">
-                        <label class="field-label">Ruolo</label>
                         <select class="form-control" name="livello">
                             <option value="1">Utente standard</option>
                             <option value="0">Amministratore</option>
@@ -491,7 +458,7 @@ ksort($tratteMap);
         el.style.background = ok ? 'var(--success-bg)' : 'var(--danger-bg)';
         el.style.color = ok ? 'var(--success-text)' : 'var(--danger-text)';
         if (ok) {
-            setTimeout(() => { el.textContent = ''; el.style.background = 'transparent'; }, 2500);
+            setTimeout(() => { el.textContent = ''; el.style.background = 'transparent'; }, 2200);
         }
     }
 
@@ -500,52 +467,68 @@ ksort($tratteMap);
         const orario = document.getElementById('ora-' + id).value;
         const badge = document.getElementById('status-' + id);
 
-        badge.textContent = '...';
         const body = new URLSearchParams({
             ajax: '1', csrf_token: CSRF_TOKEN, azione: 'update_orario', id, idLuogo, orario
         });
 
-        try {
-            const res = await fetch('admin.php', { method: 'POST', body });
-            const data = await res.json();
-            mostraStato(badge, data.ok, data.ok ? 'Salvato' : (data.error || 'Errore'));
-        } catch (e) {
-            mostraStato(badge, false, 'Errore rete');
+        const res = await fetch('admin.php', { method: 'POST', body });
+        const data = await res.json();
+        mostraStato(badge, data.ok, data.ok ? 'Salvato' : (data.error || 'Errore'));
+    }
+
+    async function spostaRiga(trattaId, orarioId, direzione) {
+        const row = document.getElementById('row-orario-' + orarioId);
+        if (!row) return;
+        const target = direzione === 'up' ? row.previousElementSibling : row.nextElementSibling;
+        if (!target) return;
+
+        const body = new URLSearchParams({
+            ajax: '1', csrf_token: CSRF_TOKEN, azione: 'move_sequenza',
+            tratta_id: trattaId, orario_id: orarioId, direzione
+        });
+
+        const res = await fetch('admin.php', { method: 'POST', body });
+        const data = await res.json();
+        if (data.ok) {
+            if (direzione === 'up') {
+                row.parentNode.insertBefore(row, target);
+            } else {
+                row.parentNode.insertBefore(target, row);
+            }
+            mostraStato(document.getElementById('status-' + orarioId), true, 'Spostato');
         }
     }
 
-    async function salvaNota(tratta, tipo, note) {
-        const badge = document.getElementById('nota-status-' + tratta);
+    async function salvaMetaTratta(trattaId) {
+        let mask = 0;
+        document.querySelectorAll('.day-cb-' + trattaId + ':checked').forEach((cb) => {
+            mask |= Number(cb.value);
+        });
+        const note = document.getElementById('nota-' + trattaId).value;
+        const badge = document.getElementById('meta-status-' + trattaId);
+
         const body = new URLSearchParams({
-            ajax: '1', csrf_token: CSRF_TOKEN, azione: 'update_nota', tratta, tipo, note
+            ajax: '1', csrf_token: CSRF_TOKEN, azione: 'update_tratta_meta',
+            tratta_id: trattaId, giorni_attivi: mask, note
         });
 
-        try {
-            const res = await fetch('admin.php', { method: 'POST', body });
-            const data = await res.json();
-            mostraStato(badge, data.ok, data.ok ? 'Nota salvata' : 'Errore');
-        } catch (e) {
-            mostraStato(badge, false, 'Errore rete');
+        const res = await fetch('admin.php', { method: 'POST', body });
+        const data = await res.json();
+        if (data.warning) {
+            mostraStato(badge, false, data.warning);
+        } else {
+            mostraStato(badge, data.ok, data.ok ? 'Aggiornato' : 'Errore');
         }
     }
 
     async function eliminaRigaOrario(id) {
-        if (!confirm('Rimuovere questa fermata dalla tratta?')) return;
+        if (!confirm('Rimuovere questa fermata?')) return;
         const body = new URLSearchParams({
             ajax: '1', csrf_token: CSRF_TOKEN, azione: 'delete_orario', id
         });
-
-        try {
-            const res = await fetch('admin.php', { method: 'POST', body });
-            const data = await res.json();
-            if (data.ok) {
-                document.getElementById('row-orario-' + id)?.remove();
-            } else {
-                alert('Errore durante l\'eliminazione.');
-            }
-        } catch (e) {
-            alert('Errore di rete.');
-        }
+        const res = await fetch('admin.php', { method: 'POST', body });
+        const data = await res.json();
+        if (data.ok) document.getElementById('row-orario-' + id)?.remove();
     }
     </script>
 

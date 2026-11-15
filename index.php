@@ -1,8 +1,7 @@
 <?php
-include_once 'database.php';
-include_once 'auth.php';
+include_once __DIR__ . '/auth.php';
 
-if (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) {
+if (!empty($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) {
     header("Location: home.php");
     exit;
 }
@@ -13,47 +12,61 @@ if (isset($_GET['redirect']) && $_GET['redirect'] === 'home') {
 }
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
-    $username = trim($_POST['username'] ?? '');
-    $password = $_POST['password'] ?? '';
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 
-    if ($username === '' || $password === '') {
-        $errorMsg = "Inserisci username e password.";
+    if (!controllaRateLimit($sxConn, $ip)) {
+        $errorMsg = "Troppi tentativi falliti. Riprova tra 15 minuti.";
     } else {
-        $sql = "SELECT username, password, livello FROM login WHERE username = ? LIMIT 1";
-        if ($stmt = $sxConn->prepare($sql)) {
-            $stmt->bind_param("s", $username);
-            $stmt->execute();
-            $res = $stmt->get_result();
+        $username = trim($_POST['username'] ?? '');
+        $password = $_POST['password'] ?? '';
+        $ricordami = isset($_POST['ricordami']);
 
-            if ($user = $res->fetch_assoc()) {
-                $storedHash = $user['password'];
+        if ($username === '' || $password === '') {
+            $errorMsg = "Inserisci username e password.";
+        } else {
+            $stmt = $sxConn->prepare("SELECT id, username, password, livello FROM login WHERE username = ? LIMIT 1");
+            if ($stmt) {
+                $stmt->bind_param("s", $username);
+                $stmt->execute();
+                $user = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+
                 $loginValido = false;
-
-                if (password_verify($password, $storedHash)) {
-                    $loginValido = true;
-                } elseif (strlen($storedHash) === 32 && hash_equals($storedHash, md5($password))) {
-                    $loginValido = true;
-                    $nuovoHash = password_hash($password, PASSWORD_DEFAULT);
-                    if ($upd = $sxConn->prepare("UPDATE login SET password = ? WHERE username = ?")) {
-                        $upd->bind_param("ss", $nuovoHash, $user['username']);
+                if ($user) {
+                    $storedHash = $user['password'];
+                    if (password_verify($password, $storedHash)) {
+                        $loginValido = true;
+                    } elseif (strlen($storedHash) === 32 && hash_equals($storedHash, md5($password))) {
+                        $loginValido = true;
+                        $nuovoHash = password_hash($password, PASSWORD_DEFAULT);
+                        $upd = $sxConn->prepare("UPDATE login SET password = ? WHERE id = ?");
+                        $upd->bind_param("si", $nuovoHash, $user['id']);
                         $upd->execute();
                         $upd->close();
                     }
                 }
 
                 if ($loginValido) {
+                    resetTentativi($sxConn, $ip);
                     session_regenerate_id(true);
                     $_SESSION['logged_in'] = true;
+                    $_SESSION['user_id'] = (int)$user['id'];
                     $_SESSION['username'] = $user['username'];
                     $_SESSION['livello'] = (int)$user['livello'];
+
+                    if ($ricordami) {
+                        creaTokenPersistente($sxConn, (int)$user['id']);
+                    }
+
                     header("Location: home.php");
                     exit;
+                } else {
+                    registraTentativoFallito($sxConn, $ip);
+                    $errorMsg = "Username o Password errati.";
                 }
+            } else {
+                $errorMsg = "Errore tecnico di connessione al database.";
             }
-            $errorMsg = "Username o Password errati.";
-            $stmt->close();
-        } else {
-            $errorMsg = "Errore tecnico di connessione al database.";
         }
     }
 }
@@ -63,22 +76,18 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 <head>
     <title>Accedi - ShuttleX</title>
     <meta name="robots" content="noindex, nofollow">
-    <?php include_once 'styles/header-include.php'; ?>
+    <?php include_once __DIR__ . '/styles/header-include.php'; ?>
 </head>
 <body>
-    <header class="app-header">
-        <div class="container">
-            <div class="topbar" style="margin-bottom: 0;">
-                <a href="index.php" class="brand-logo">
-                    <i class="fa-solid fa-bus-simple" aria-hidden="true"></i>
-                    <span>SX <span class="sub">ShuttleX</span></span>
-                </a>
-                <span class="status-meta"><?= date('d/m/Y') ?></span>
-            </div>
+    <header class="app-topbar">
+        <div class="container topbar-inner">
+            <a href="home.php" class="brand-logo">
+                <span class="brand-badge"><i class="fa-solid fa-bus-simple" aria-hidden="true"></i> SX</span>
+                <span>ShuttleX</span>
+            </a>
+            <span class="status-meta"><?= date('d/m/Y') ?></span>
         </div>
     </header>
-
-    <?php include_once 'manutenzione.php'; ?>
 
     <main id="main-content" class="container" style="max-width: 480px;">
         <section class="card" aria-labelledby="login-heading">
@@ -102,7 +111,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     <input id="username" class="form-control" type="text" name="username" required autocomplete="username" placeholder="Inserisci il tuo username">
                 </div>
 
-                <div class="field-group" style="margin-bottom: 18px;">
+                <div class="field-group" style="margin-bottom: 14px;">
                     <label for="password" class="field-label">Password</label>
                     <div style="position: relative;">
                         <input id="password" class="form-control" type="password" name="password" required autocomplete="current-password" placeholder="Inserisci la tua password" style="padding-right: 46px;">
@@ -114,6 +123,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         </button>
                     </div>
                 </div>
+
+                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 18px; font-size: 0.9rem; cursor: pointer;">
+                    <input type="checkbox" name="ricordami" checked style="width: 18px; height: 18px;">
+                    Resta connesso su questo dispositivo (30 giorni)
+                </label>
 
                 <button class="btn btn-primary" type="submit" style="width: 100%; font-size: 1rem;">
                     Accedi <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
@@ -128,7 +142,19 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             </div>
         </section>
 
-        <?php include_once 'components/disclaimer-box.php'; ?>
+        <section class="disclaimer-box" aria-labelledby="disclaimer-heading">
+            <h2 id="disclaimer-heading">
+                <i class="fa-solid fa-shield-halved" aria-hidden="true"></i> Informazioni e Condizioni d'Uso
+            </h2>
+            <p style="margin: 0 0 8px;">
+                Questo portale è un'iniziativa indipendente sviluppata a <strong>puro scopo informativo</strong> e senza fini di lucro per agevolare la consultazione degli orari della navetta. <strong>Non riveste carattere di ufficialità.</strong>
+            </p>
+            <ul class="disclaimer-list">
+                <li>L'accesso agli orari è limitato tramite autenticazione per tutelare la riservatezza del servizio di trasporto privato.</li>
+                <li>Le credenziali vengono rilasciate su richiesta all'assistenza.</li>
+                <li>Gli orari, pur aggiornati regolarmente, potrebbero differire dalle disposizioni dell'amministrazione in tempo reale.</li>
+            </ul>
+        </section>
     </main>
 
     <script>

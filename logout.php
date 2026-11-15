@@ -1,11 +1,20 @@
 <?php
-session_start();
+include_once __DIR__ . '/auth.php';
 
-// Svuoto e distruggo la sessione
-$_SESSION = array();
+if (!empty($_COOKIE['sx_remember'])) {
+    $parts = explode(':', $_COOKIE['sx_remember'], 2);
+    if (count($parts) === 2) {
+        $stmt = $sxConn->prepare("DELETE FROM auth_tokens WHERE selector = ?");
+        if ($stmt) {
+            $stmt->bind_param("s", $parts[0]);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+    setcookie('sx_remember', '', time() - 3600, '/');
+}
+
+$_SESSION = [];
 session_destroy();
-
-// Reindirizzo immediato alla pagina di login
-header("location: index.php");
+header("Location: index.php");
 exit;
-?>
