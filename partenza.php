@@ -1,119 +1,95 @@
 <?php
-// Parametro obbligatorio
-if(!isset($_GET['fermata'])) die("<h1>Errore 400 - Richiesta Non Valida</h1><p>Il parametro 'fermata' è obbligatorio. Controllare il link di provenienza.</p>");
+include_once 'auth.php';
+requireLogin();
 
-$fermata = $_GET['fermata'];
+if (empty($_GET['fermata'])) {
+    header("Location: home.php");
+    exit;
+}
+
+$fermata = trim($_GET['fermata']);
+$destinazione = trim($_GET['destinazione'] ?? '');
 $tipoGiorno = isset($_GET['fest']) ? (int)$_GET['fest'] : (date('N') < 6 ? 0 : 1);
-$ora = isset($_GET['orario']) ? $_GET['orario'] : date('H:i:s');
+$ora = isset($_GET['orario']) && preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $_GET['orario'])
+    ? (strlen($_GET['orario']) === 5 ? $_GET['orario'] . ':00' : $_GET['orario'])
+    : date('H:i:s');
 
-include_once 'header.php'; 
+include_once 'header.php';
 
-// Troviamo le tratte che passano per la fermata selezionata
-$queryTratte = "
-    SELECT DISTINCT tratta
-    FROM orari
-    WHERE tipoGiorno = $tipoGiorno AND idLuogo = '$fermata'
+$sqlTratte = "
+    SELECT DISTINCT O1.tratta, O1.orario AS orarioPartenza, T.note
+    FROM orari O1
+    JOIN tratte T ON T.numero = O1.tratta AND T.tipo = O1.tipoGiorno
+    WHERE O1.tipoGiorno = ?
+      AND O1.idLuogo = ?
+      AND O1.orario >= ?
+    ORDER BY O1.orario ASC
 ";
-$tratteResult = $sxConn->query($queryTratte);
 
-// 🚩 INIZIALIZZAZIONE CONTATORE/FLAG 
-$tratteTrovate = 0;
+$stmt = $sxConn->prepare($sqlTratte);
+$stmt->bind_param("iss", $tipoGiorno, $fermata, $ora);
+$stmt->execute();
+$resTratte = $stmt->get_result();
 
-while($trattaRow = $tratteResult->fetch_assoc()) {
-    $tratta = $trattaRow['tratta'];
+$corseValide = [];
 
-    // Recupero note della tratta
-    $queryNote = "SELECT note FROM tratte WHERE numero = $tratta AND tipo = $tipoGiorno LIMIT 1";
-    $noteRes = $sxConn->query($queryNote);
-    $note = "";
-    if ($noteRes && $noteRes->num_rows > 0) {
-        $noteVal = $noteRes->fetch_assoc()['note'];
-        if (!is_null($noteVal) && trim($noteVal) !== "") {
-            $note = " <small class='w3-text-grey'>($noteVal)</small>";
-        }
-    }
+$stmtFermate = $sxConn->prepare("
+    SELECT O.orario, O.idLuogo, L.denominazione
+    FROM orari O
+    JOIN luogo L ON L.id = O.idLuogo
+    WHERE O.tratta = ?
+      AND O.tipoGiorno = ?
+      AND O.orario >= ?
+    ORDER BY O.orario ASC
+");
 
-    // Recuperiamo l'orario della fermata selezionata più vicina >= ora richiesta
-    $queryStart = "
-        SELECT orario 
-        FROM orari 
-        WHERE tratta = $tratta AND tipoGiorno = $tipoGiorno AND idLuogo = '$fermata' AND orario >= '$ora'
-        ORDER BY orario ASC LIMIT 1
-    ";
-    $startResult = $sxConn->query($queryStart);
-    
-    // Se non c'è una corsa successiva all'ora richiesta, saltiamo la tratta
-    if($startResult->num_rows == 0) continue; 
-    $startOrario = $startResult->fetch_assoc()['orario'];
+while ($rowTratta = $resTratte->fetch_assoc()) {
+    $trattaNum = (int)$rowTratta['tratta'];
+    $startOrario = $rowTratta['orarioPartenza'];
 
-    // Recuperiamo tutte le fermate della tratta a partire dalla fermata selezionata
-    $queryOrari = "
-        SELECT O.orario, O.idLuogo, L.denominazione
-        FROM orari O
-        JOIN luogo L ON L.id = O.idLuogo
-        WHERE O.tratta = $tratta
-        AND O.tipoGiorno = $tipoGiorno
-        AND O.orario >= '$startOrario'
-        ORDER BY O.orario
-    ";
-    $resultOrari = $sxConn->query($queryOrari);
-
-    // Se la tratta ha meno di due fermate (es. solo la fermata di partenza), la saltiamo
-    if($resultOrari->num_rows < 2) continue;
-
-    // 🏆 A questo punto, una tratta è stata trovata e sta per essere visualizzata
-    $tratteTrovate++; 
+    $stmtFermate->bind_param("iis", $trattaNum, $tipoGiorno, $startOrario);
+    $stmtFermate->execute();
+    $resFermate = $stmtFermate->get_result();
 
     $fermate = [];
-    while($row = $resultOrari->fetch_assoc()){
-        $fermate[] = $row;
-    }
+    $raggiungeDestinazione = ($destinazione === '');
 
-    // --- Inizio Output HTML per la tratta ---
-    echo '<div class="w3-container">';
-    echo '  <div class="w3-panel w3-card-4">';
-    echo "    <h3 class='w3-center c-primary'>Tratta $tratta$note</h3>";
-    echo "    <ul class='w3-ul'>";
-    
-    foreach ($fermate as $i => $row) {
-        $orarioFmt = substr($row['orario'], 0, 5); // HH:MM
-        $classeExtra = '';
-        $icona = "<i class='fa-solid fa-road'></i> ";
-
-        if ($i == 0) {
-            $classeExtra = ' w3-pale-green'; 
-            $icona = "<i class='fa-solid fa-bus'></i> ";
-        } elseif ($i == count($fermate) - 1) {
-            $classeExtra = ''; 
-            $icona = "<i class='fa-solid fa-building-circle-check'></i> ";
+    while ($f = $resFermate->fetch_assoc()) {
+        $fermate[] = $f;
+        if ($destinazione !== '' && count($fermate) > 1 && $f['idLuogo'] === $destinazione) {
+            $raggiungeDestinazione = true;
         }
-
-        echo "<li class='$classeExtra' data-luogo='{$row['idLuogo']}' data-orario='{$row['orario']}'>
-                $icona <b>{$row['denominazione']}</b>
-                <span class='w3-right'>{$orarioFmt}</span>
-              </li>";
     }
 
-    echo "    </ul>";
-    echo "    <h4 class='w3-center c-primary'></h4>"; 
-    echo "  </div>";
-    echo "</div>";
-    // --- Fine Output HTML per la tratta ---
+    if (count($fermate) >= 2 && $raggiungeDestinazione) {
+        $corseValide[] = [
+            'tratta' => $trattaNum,
+            'note' => $rowTratta['note'],
+            'fermate' => $fermate
+        ];
+    }
 }
 
-// 🛑 CONTROLLO FINALE E MESSAGGIO DI AVVISO
-if ($tratteTrovate === 0) {
-    $giorno = ($tipoGiorno === 1) ? 'festivo' : 'feriale';
-    
-    // Inizializza il pannello con le stesse classi delle tratte,
-    // usando un colore che indichi l'assenza di risultati (es. w3-light-gray o w3-red)
+$stmtFermate->close();
+$stmt->close();
+
+if (empty($corseValide)) {
+    $giornoLabel = ($tipoGiorno === 1) ? 'festivo' : 'feriale';
+    $oraFmt = substr($ora, 0, 5);
     echo '<div class="w3-container">';
-    echo '  <div class="w3-panel w3-card-4 w3-red">'; // Ho usato w3-red per maggiore enfasi
+    echo '  <div class="w3-panel w3-card-4 w3-red w3-round">';
     echo '    <h3 class="w3-center">Nessuna Tratta Trovata</h3>';
-    echo "    <p class='w3-center'>Non ci sono corse disponibili per la fermata selezionata a partire dalle ore <b>$ora</b> per un giorno <b>$giorno</b>.</p>";
+    echo "    <p class='w3-center'>Non ci sono corse disponibili per i criteri selezionati a partire dalle ore <b>{$oraFmt}</b> (giorno <b>{$giornoLabel}</b>).</p>";
     echo '  </div>';
     echo '</div>';
+} else {
+    $destinazioneSelezionata = $destinazione !== '' ? $destinazione : null;
+    foreach ($corseValide as $corsa) {
+        $trattaNum = $corsa['tratta'];
+        $noteTratta = $corsa['note'];
+        $fermate = $corsa['fermate'];
+        include 'components/tratta-card.php';
+    }
 }
 
-include_once 'footer.php'; 
-?>
+include_once 'footer.php';
