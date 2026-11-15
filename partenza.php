@@ -72,17 +72,25 @@ while ($rowTratta = $resTratte->fetch_assoc()) {
 
 $stmtFermate->close();
 $stmt->close();
+?>
 
-if (empty($corseValide)) {
+<h1 class="sr-only">Risultati ricerca navetta</h1>
+
+<?php if (empty($corseValide)):
     $giornoLabel = ($tipoGiorno === 1) ? 'festivo' : 'feriale';
     $oraFmt = substr($ora, 0, 5);
-    echo '<div class="w3-container">';
-    echo '  <div class="w3-panel w3-card-4 w3-red w3-round">';
-    echo '    <h3 class="w3-center">Nessuna Tratta Trovata</h3>';
-    echo "    <p class='w3-center'>Non ci sono corse disponibili per i criteri selezionati a partire dalle ore <b>{$oraFmt}</b> (giorno <b>{$giornoLabel}</b>).</p>";
-    echo '  </div>';
-    echo '</div>';
-} else {
+?>
+    <section class="card empty-state" role="status">
+        <i class="fa-solid fa-route" aria-hidden="true"></i>
+        <h2 style="margin: 0 0 6px; font-size: 1.15rem;">Nessuna corsa trovata</h2>
+        <p style="margin: 0 0 16px; color: var(--text-muted);">
+            Nessuna partenza disponibile dalle ore <strong><?= $oraFmt ?></strong> per l'orario <strong><?= $giornoLabel ?></strong> con i filtri scelti.
+        </p>
+        <a href="home.php?show=all&fest=<?= $tipoGiorno ?>" class="btn btn-chip">
+            Vedi tutte le tratte
+        </a>
+    </section>
+<?php else:
     $destinazioneSelezionata = $destinazione !== '' ? $destinazione : null;
     foreach ($corseValide as $corsa) {
         $trattaNum = $corsa['tratta'];
@@ -90,6 +98,6 @@ if (empty($corseValide)) {
         $fermate = $corsa['fermate'];
         include 'components/tratta-card.php';
     }
-}
+endif;
 
 include_once 'footer.php';

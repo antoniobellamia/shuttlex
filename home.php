@@ -47,23 +47,31 @@ while ($row = $result->fetch_assoc()) {
 $stmt->close();
 
 $tratte = array_filter($tratte, fn($t) => count($t['fermate']) > 1);
+?>
 
-if (empty($tratte)) {
+<h1 class="sr-only">Orari Navetta <?= $tipoGiorno ? 'Festivi' : 'Feriali' ?></h1>
+
+<?php if (empty($tratte)):
     $giornoLabel = ($tipoGiorno === 1) ? 'festivo' : 'feriale';
     $filtroOra = $showAll ? 'tutto il giorno' : 'dopo le ore ' . substr($ora, 0, 5);
-    echo '<div class="w3-container">';
-    echo '  <div class="w3-panel w3-card-4 w3-red w3-round">';
-    echo '    <h3 class="w3-center">Nessuna Tratta Disponibile</h3>';
-    echo "    <p class='w3-center'>Non sono disponibili corse {$filtroOra} (giorno <b>{$giornoLabel}</b>).</p>";
-    echo '  </div>';
-    echo '</div>';
-} else {
+?>
+    <section class="card empty-state" role="status">
+        <i class="fa-solid fa-bus-simple" aria-hidden="true"></i>
+        <h2 style="margin: 0 0 6px; font-size: 1.15rem;">Nessuna corsa disponibile</h2>
+        <p style="margin: 0 0 16px; color: var(--text-muted);">
+            Non ci sono partenze <?= $filtroOra ?> per l'orario <strong><?= $giornoLabel ?></strong>.
+        </p>
+        <a href="home.php?show=all&fest=<?= $tipoGiorno ?>" class="btn btn-chip">
+            Mostra tutte le corse della giornata
+        </a>
+    </section>
+<?php else:
     $destinazioneSelezionata = null;
     foreach ($tratte as $trattaNum => $datiTratta) {
         $noteTratta = $datiTratta['note'];
         $fermate = $datiTratta['fermate'];
         include 'components/tratta-card.php';
     }
-}
+endif;
 
 include_once 'footer.php';

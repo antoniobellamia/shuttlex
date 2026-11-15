@@ -33,14 +33,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['ajax'] ?? '') === '1') {
         $stmt = $sxConn->prepare("UPDATE orari SET idLuogo = ?, orario = ? WHERE id = ?");
         $stmt->bind_param("ssi", $idLuogo, $orario, $id);
         $ok = $stmt->execute();
-        $err = $stmt->error;
         $stmt->close();
 
         if ($ok) {
             $sxConn->query("UPDATE modifica SET ultimaModifica = NOW() WHERE id = 1");
             echo json_encode(['ok' => true]);
         } else {
-            echo json_encode(['ok' => false, 'error' => 'Conflitto orario/fermata sulla stessa tratta (' . $err . ')']);
+            echo json_encode(['ok' => false, 'error' => 'Orario/fermata già presente']);
         }
         exit;
     }
@@ -83,7 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['ajax'] ?? '') === '1') {
 
 // --- GESTIONE FORM TRADIZIONALI ---
 $feedback = '';
-$feedbackClass = 'w3-green';
+$feedbackType = 'alert-success';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'] ?? '')) {
@@ -122,7 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $feedback = "Fermata aggiunta alla Tratta #{$tratta}.";
         } else {
             $feedback = "Errore: fermata/orario già presente su questa tratta.";
-            $feedbackClass = 'w3-red';
+            $feedbackType = 'alert-danger';
         }
         $stmt->close();
     }
@@ -177,7 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->bind_param("ssi", $newUser, $hash, $livello);
             $stmt->execute();
             $stmt->close();
-            $feedback = "Utente '{$newUser}' salvato con successo.";
+            $feedback = "Utente '{$newUser}' salvato.";
         }
     }
 }
@@ -226,130 +225,125 @@ ksort($tratteMap);
 <head>
     <title>Admin - ShuttleX</title>
     <?php include_once 'styles/header-include.php'; ?>
-    <style>
-        .status-pill { font-size: 0.8em; padding: 2px 8px; border-radius: 4px; display: inline-block; }
-        .tratta-admin-card { border-top: 4px solid var(--primary-color); }
-        .inline-input { padding: 4px 6px !important; height: auto !important; }
-    </style>
 </head>
-<body class="w3-light-grey">
-    <nav class="w3-white">
-        <div class="pure-g" style="align-items: center;">
-            <div class="pure-u-1-2">
-                <a href="home.php"><h2 class="c-margin-not" style="margin-top:0;">SX <small style="font-size:0.5em;">Admin</small></h2></a>
-            </div>
-            <div class="pure-u-1-2" style="text-align: right;">
-                <a href="home.php" class="w3-button w3-small w3-blue w3-round">
-                    <i class="fa-solid fa-arrow-left"></i> Torna all'App
+<body>
+    <header class="app-header">
+        <div class="container">
+            <div class="topbar" style="margin-bottom: 0;">
+                <a href="home.php" class="brand-logo">
+                    <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+                    <span>SX <span class="sub">Pannello Admin</span></span>
+                </a>
+                <a href="home.php" class="btn btn-chip btn-sm">
+                    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Torna all'App
                 </a>
             </div>
         </div>
-    </nav>
+    </header>
 
-    <div class="w3-container" style="max-width: 960px; margin: auto; padding-top: 16px;">
+    <main id="main-content" class="container">
         <?php if ($feedback !== ''): ?>
-            <div class="w3-panel <?= $feedbackClass ?> w3-round w3-padding">
-                <b><?= htmlspecialchars($feedback) ?></b>
+            <div class="alert <?= $feedbackType ?>" role="status" aria-live="polite">
+                <strong><?= htmlspecialchars($feedback) ?></strong>
             </div>
         <?php endif; ?>
 
-        <!-- BARRA SELETTORE GIORNO + NUOVA TRATTA -->
-        <div class="w3-panel w3-card-4 w3-white w3-round w3-padding-16">
-            <div class="w3-row-padding" style="align-items: center;">
-                <div class="w3-col s12 m6">
-                    <h4 class="c-primary" style="margin-top:0;"><i class="fa-solid fa-calendar-days"></i> Editor Interattivo Orari</h4>
-                    <a href="admin.php?tipo=0" class="w3-button w3-round <?= $filtroTipo === 0 ? 'w3-dark-grey' : 'w3-light-grey' ?>">
-                        FERIALE
+        <!-- SELETTORE GIORNO E DUPLICAZIONE -->
+        <section class="card">
+            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px;">
+                <div style="display: flex; gap: 8px;">
+                    <a href="admin.php?tipo=0" class="btn btn-sm <?= $filtroTipo === 0 ? 'btn-primary' : 'btn-chip' ?>">
+                        Feriale
                     </a>
-                    <a href="admin.php?tipo=1" class="w3-button w3-round <?= $filtroTipo === 1 ? 'w3-pink' : 'w3-light-grey' ?>">
-                        FESTIVO
+                    <a href="admin.php?tipo=1" class="btn btn-sm <?= $filtroTipo === 1 ? 'btn-primary' : 'btn-chip' ?>">
+                        Festivo
                     </a>
                 </div>
-                <div class="w3-col s12 m6 w3-margin-top">
-                    <button onclick="document.getElementById('boxNuovaTratta').classList.toggle('w3-hide')" class="w3-button w3-blue w3-round w3-right">
-                        <i class="fa-solid fa-copy"></i> Crea / Duplica Tratta
-                    </button>
-                </div>
+                <button type="button"
+                        onclick="document.getElementById('boxDuplica').hidden = !document.getElementById('boxDuplica').hidden"
+                        class="btn btn-chip btn-sm">
+                    <i class="fa-solid fa-copy" aria-hidden="true"></i> Duplica Tratta
+                </button>
             </div>
 
-            <!-- BOX DUPLICA / CREA TRATTA -->
-            <div id="boxNuovaTratta" class="w3-hide w3-margin-top w3-padding w3-light-grey w3-round w3-border">
-                <h5 style="margin-top:0;"><b>Duplica una tratta esistente (con eventuale shift orario)</b></h5>
-                <form method="post" class="w3-row-padding">
+            <div id="boxDuplica" hidden style="margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);">
+                <form method="post" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px;">
                     <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
                     <input type="hidden" name="azione" value="duplica_tratta">
                     <input type="hidden" name="src_tipo" value="<?= $filtroTipo ?>">
 
-                    <div class="w3-col s6 m3">
-                        <label class="w3-small">Copia da Tratta N°</label>
-                        <input class="w3-input w3-border w3-round" type="number" name="src_tratta" min="1" required value="1">
+                    <div class="field-group">
+                        <label class="field-label">Copia da Tratta N°</label>
+                        <input class="form-control" type="number" name="src_tratta" min="1" required value="1">
                     </div>
-                    <div class="w3-col s6 m3">
-                        <label class="w3-small">Nuova Tratta N°</label>
-                        <input class="w3-input w3-border w3-round" type="number" name="dst_tratta" min="1" required value="<?= count($tratteMap) + 1 ?>">
+                    <div class="field-group">
+                        <label class="field-label">Nuova Tratta N°</label>
+                        <input class="form-control" type="number" name="dst_tratta" min="1" required value="<?= count($tratteMap) + 1 ?>">
                     </div>
-                    <div class="w3-col s6 m3">
-                        <label class="w3-small">Destinazione Giorno</label>
-                        <select class="w3-select w3-border w3-round" name="dst_tipo">
+                    <div class="field-group">
+                        <label class="field-label">Giorno Destinazione</label>
+                        <select class="form-control" name="dst_tipo">
                             <option value="0" <?= $filtroTipo === 0 ? 'selected' : '' ?>>Feriale</option>
                             <option value="1" <?= $filtroTipo === 1 ? 'selected' : '' ?>>Festivo</option>
                         </select>
                     </div>
-                    <div class="w3-col s6 m3">
-                        <label class="w3-small">Sposta orari (minuti)</label>
-                        <input class="w3-input w3-border w3-round" type="number" name="offset_minuti" value="0" placeholder="es. 60 o -30">
+                    <div class="field-group">
+                        <label class="field-label">Sposta orari (min)</label>
+                        <input class="form-control" type="number" name="offset_minuti" value="0">
                     </div>
-                    <div class="w3-col s12 w3-margin-top">
-                        <button type="submit" class="w3-button w3-green w3-round">Duplica Tratta</button>
+                    <div class="field-group" style="justify-content: flex-end;">
+                        <button type="submit" class="btn btn-primary">Duplica</button>
                     </div>
                 </form>
             </div>
-        </div>
+        </section>
 
-        <!-- CARD INTERATTIVE PER OGNI TRATTA -->
+        <!-- EDITOR INTERATTIVO TRATTE -->
         <?php foreach ($tratteMap as $numTratta => $dati): ?>
-            <div class="w3-panel w3-card-4 w3-white w3-round w3-padding-16 tratta-admin-card" id="card-tratta-<?= $numTratta ?>">
-                <div class="w3-row-padding" style="align-items: center; margin-bottom: 10px;">
-                    <div class="w3-col s12 m4">
-                        <h4 class="c-primary" style="margin:0;">
-                            <b>Tratta #<?= $numTratta ?></b>
-                            <span id="nota-status-<?= $numTratta ?>" class="status-pill"></span>
-                        </h4>
-                    </div>
-                    <div class="w3-col s9 m6">
+            <article class="card" id="card-tratta-<?= $numTratta ?>">
+                <div class="tratta-header">
+                    <h2 class="tratta-title">
+                        <span>Tratta #<?= $numTratta ?></span>
+                        <span id="nota-status-<?= $numTratta ?>" class="status-pill" aria-live="polite"></span>
+                    </h2>
+
+                    <div style="display: flex; gap: 8px; flex: 1 1 260px; justify-content: flex-end;">
                         <input type="text"
-                               class="w3-input w3-border w3-round inline-input"
+                               class="form-control"
+                               style="min-height: 38px; padding: 6px 10px;"
+                               aria-label="Nota tratta <?= $numTratta ?>"
                                value="<?= htmlspecialchars($dati['note']) ?>"
-                               placeholder="Nota tratta (es. Solo POLIBA, SOLO SABATO)..."
+                               placeholder="Nota (es. Solo POLIBA)..."
                                onchange="salvaNota(<?= $numTratta ?>, <?= $filtroTipo ?>, this.value)">
-                    </div>
-                    <div class="w3-col s3 m2 w3-right-align">
-                        <form method="post" style="display:inline;" onsubmit="return confirm('Eliminare l\'intera Tratta #<?= $numTratta ?> e tutte le sue fermate?');">
+
+                        <form method="post" onsubmit="return confirm('Eliminare l\'intera Tratta #<?= $numTratta ?>?');">
                             <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
                             <input type="hidden" name="azione" value="elimina_tratta">
                             <input type="hidden" name="tratta" value="<?= $numTratta ?>">
                             <input type="hidden" name="tipo" value="<?= $filtroTipo ?>">
-                            <button type="submit" class="w3-button w3-small w3-red w3-round" title="Elimina intera tratta">
-                                <i class="fa-solid fa-trash-can"></i>
+                            <button type="submit" class="btn btn-danger btn-sm" aria-label="Elimina intera tratta <?= $numTratta ?>">
+                                <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
                             </button>
                         </form>
                     </div>
                 </div>
 
-                <div class="w3-responsive">
-                    <table class="w3-table w3-bordered w3-small">
+                <div class="table-wrap">
+                    <table class="data-table">
                         <thead>
-                            <tr class="w3-light-grey">
-                                <th style="width: 50%;">Fermata</th>
-                                <th style="width: 25%;">Orario</th>
-                                <th style="width: 25%;" class="w3-right-align">Stato / Azioni</th>
+                            <tr>
+                                <th>Fermata</th>
+                                <th style="width: 120px;">Orario</th>
+                                <th style="width: 110px; text-align: right;">Azioni</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($dati['fermate'] as $f): ?>
                                 <tr id="row-orario-<?= (int)$f['id'] ?>">
                                     <td>
-                                        <select class="w3-select w3-border w3-round inline-input"
+                                        <select class="form-control"
+                                                style="min-height: 40px; padding: 6px 10px;"
+                                                aria-label="Fermata"
                                                 id="luogo-<?= (int)$f['id'] ?>"
                                                 onchange="salvaRigaOrario(<?= (int)$f['id'] ?>)">
                                             <?php foreach ($luoghi as $l): ?>
@@ -361,18 +355,20 @@ ksort($tratteMap);
                                     </td>
                                     <td>
                                         <input type="time"
-                                               class="w3-input w3-border w3-round inline-input"
+                                               class="form-control"
+                                               style="min-height: 40px; padding: 6px 8px;"
+                                               aria-label="Orario"
                                                id="ora-<?= (int)$f['id'] ?>"
                                                value="<?= substr($f['orario'], 0, 5) ?>"
                                                onchange="salvaRigaOrario(<?= (int)$f['id'] ?>)">
                                     </td>
-                                    <td class="w3-right-align" style="vertical-align: middle;">
-                                        <span id="status-<?= (int)$f['id'] ?>" class="status-pill"></span>
+                                    <td style="text-align: right; white-space: nowrap;">
+                                        <span id="status-<?= (int)$f['id'] ?>" class="status-pill" aria-live="polite"></span>
                                         <button type="button"
                                                 onclick="eliminaRigaOrario(<?= (int)$f['id'] ?>)"
-                                                class="w3-button w3-tiny w3-pale-red w3-text-red w3-hover-red w3-round"
-                                                title="Rimuovi fermata">
-                                            <i class="fa-solid fa-xmark"></i>
+                                                class="btn btn-danger btn-sm"
+                                                aria-label="Elimina fermata">
+                                            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
                                         </button>
                                     </td>
                                 </tr>
@@ -381,115 +377,110 @@ ksort($tratteMap);
                     </table>
                 </div>
 
-                <!-- AGGIUNTA RAPIDA FERMATA IN CODA ALLA TRATTA -->
-                <form method="post" class="w3-row-padding w3-margin-top w3-padding-small w3-light-grey w3-round" style="align-items: center;">
+                <!-- AGGIUNGI FERMATA IN CODA -->
+                <form method="post" style="display: grid; grid-template-columns: 1fr 120px auto; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border);">
                     <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
                     <input type="hidden" name="azione" value="aggiungi_orario">
                     <input type="hidden" name="tipoGiorno" value="<?= $filtroTipo ?>">
                     <input type="hidden" name="tratta" value="<?= $numTratta ?>">
 
-                    <div class="w3-col s6 m6">
-                        <select class="w3-select w3-border w3-round inline-input" name="idLuogo" required>
-                            <?php foreach ($luoghi as $l): ?>
-                                <option value="<?= htmlspecialchars($l['id']) ?>"><?= htmlspecialchars($l['denominazione']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="w3-col s3 m3">
-                        <input class="w3-input w3-border w3-round inline-input" type="time" name="orario" required>
-                    </div>
-                    <div class="w3-col s3 m3">
-                        <button type="submit" class="w3-button w3-small w3-blue w3-round w3-block">
-                            <i class="fa-solid fa-plus"></i> Aggiungi
-                        </button>
-                    </div>
+                    <select class="form-control" style="min-height: 40px;" name="idLuogo" aria-label="Nuova fermata" required>
+                        <?php foreach ($luoghi as $l): ?>
+                            <option value="<?= htmlspecialchars($l['id']) ?>"><?= htmlspecialchars($l['denominazione']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <input class="form-control" style="min-height: 40px;" type="time" name="orario" aria-label="Orario nuova fermata" required>
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="fa-solid fa-plus" aria-hidden="true"></i> Aggiungi
+                    </button>
                 </form>
-            </div>
+            </article>
         <?php endforeach; ?>
 
-        <!-- AGGIUNGI UNA NUOVA TRATTA DA ZERO -->
-        <div class="w3-panel w3-card-4 w3-white w3-round w3-padding-16">
-            <h4 class="c-primary"><i class="fa-solid fa-plus-circle"></i> Aggiungi Fermata su Nuova Tratta</h4>
-            <form method="post" class="w3-row-padding">
+        <!-- CREA NUOVA TRATTA -->
+        <section class="card">
+            <h2 style="margin: 0 0 12px; font-size: 1.05rem; color: var(--brand-dark);">
+                <i class="fa-solid fa-plus-circle" aria-hidden="true"></i> Crea Nuova Tratta
+            </h2>
+            <form method="post" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px;">
                 <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
                 <input type="hidden" name="azione" value="aggiungi_orario">
                 <input type="hidden" name="tipoGiorno" value="<?= $filtroTipo ?>">
 
-                <div class="w3-col s4 m2">
-                    <label class="w3-small">N° Tratta</label>
-                    <input class="w3-input w3-border w3-round" type="number" name="tratta" min="1" max="99" required value="<?= count($tratteMap) + 1 ?>">
+                <div class="field-group">
+                    <label class="field-label">N° Tratta</label>
+                    <input class="form-control" type="number" name="tratta" min="1" max="99" required value="<?= count($tratteMap) + 1 ?>">
                 </div>
-                <div class="w3-col s8 m5">
-                    <label class="w3-small">Fermata</label>
-                    <select class="w3-select w3-border w3-round" name="idLuogo" required>
+                <div class="field-group">
+                    <label class="field-label">Prima Fermata</label>
+                    <select class="form-control" name="idLuogo" required>
                         <?php foreach ($luoghi as $l): ?>
                             <option value="<?= htmlspecialchars($l['id']) ?>"><?= htmlspecialchars($l['denominazione']) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div class="w3-col s6 m3">
-                    <label class="w3-small">Orario</label>
-                    <input class="w3-input w3-border w3-round" type="time" name="orario" required>
+                <div class="field-group">
+                    <label class="field-label">Orario</label>
+                    <input class="form-control" type="time" name="orario" required>
                 </div>
-                <div class="w3-col s6 m2">
-                    <label class="w3-small">&nbsp;</label>
-                    <button type="submit" class="w3-button w3-blue w3-round w3-block">Crea</button>
+                <div class="field-group" style="justify-content: flex-end;">
+                    <button type="submit" class="btn btn-primary">Crea Tratta</button>
                 </div>
             </form>
-        </div>
+        </section>
 
-        <!-- MANUTENZIONE E GESTIONE UTENTI -->
-        <div class="w3-row-padding" style="margin: 0 -8px;">
-            <div class="w3-col s12 m6">
-                <div class="w3-panel w3-card-4 w3-white w3-round w3-padding-16">
-                    <h4 class="c-primary"><i class="fa-solid fa-wrench"></i> Stato Manutenzione</h4>
-                    <form method="post">
-                        <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
-                        <input type="hidden" name="azione" value="manutenzione">
-                        <p>
-                            <label>
-                                <input class="w3-check" type="checkbox" name="manutenzione_attiva" <?= !empty($imp['manutenzione_attiva']) ? 'checked' : '' ?>>
-                                Mostra banner avviso
-                            </label>
-                        </p>
-                        <p>
-                            <label>
-                                <input class="w3-check" type="checkbox" name="manutenzione_bloccata" <?= !empty($imp['manutenzione_bloccata']) ? 'checked' : '' ?>>
-                                Blocca app agli utenti non admin
-                            </label>
-                        </p>
-                        <p>
-                            <input class="w3-input w3-border w3-round" type="text" name="manutenzione_messaggio" value="<?= htmlspecialchars($imp['manutenzione_messaggio'] ?? '') ?>">
-                        </p>
-                        <button type="submit" class="w3-button w3-orange w3-round">Salva Stato</button>
-                    </form>
-                </div>
-            </div>
+        <!-- MANUTENZIONE & UTENTI -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+            <section class="card" style="margin-bottom: 0;">
+                <h2 style="margin: 0 0 12px; font-size: 1.05rem; color: var(--brand-dark);">
+                    <i class="fa-solid fa-wrench" aria-hidden="true"></i> Manutenzione
+                </h2>
+                <form method="post">
+                    <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
+                    <input type="hidden" name="azione" value="manutenzione">
+                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; min-height: 36px; cursor: pointer;">
+                        <input type="checkbox" name="manutenzione_attiva" <?= !empty($imp['manutenzione_attiva']) ? 'checked' : '' ?> style="width: 20px; height: 20px;">
+                        Mostra banner avviso
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; min-height: 36px; cursor: pointer;">
+                        <input type="checkbox" name="manutenzione_bloccata" <?= !empty($imp['manutenzione_bloccata']) ? 'checked' : '' ?> style="width: 20px; height: 20px;">
+                        Blocca consultazione orari
+                    </label>
+                    <div class="field-group" style="margin-bottom: 12px;">
+                        <label class="field-label">Messaggio banner</label>
+                        <input class="form-control" type="text" name="manutenzione_messaggio" value="<?= htmlspecialchars($imp['manutenzione_messaggio'] ?? '') ?>">
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Salva Stato</button>
+                </form>
+            </section>
 
-            <div class="w3-col s12 m6">
-                <div class="w3-panel w3-card-4 w3-white w3-round w3-padding-16">
-                    <h4 class="c-primary"><i class="fa-solid fa-users"></i> Crea Utente / Reset Password</h4>
-                    <form method="post">
-                        <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
-                        <input type="hidden" name="azione" value="salva_utente">
-                        <p>
-                            <input class="w3-input w3-border w3-round" type="text" name="new_username" required placeholder="Username">
-                        </p>
-                        <p>
-                            <input class="w3-input w3-border w3-round" type="password" name="new_password" required placeholder="Nuova Password">
-                        </p>
-                        <p>
-                            <select class="w3-select w3-border w3-round" name="livello">
-                                <option value="1">Utente standard</option>
-                                <option value="0">Amministratore</option>
-                            </select>
-                        </p>
-                        <button type="submit" class="w3-button w3-blue w3-round">Salva Utente</button>
-                    </form>
-                </div>
-            </div>
+            <section class="card" style="margin-bottom: 0;">
+                <h2 style="margin: 0 0 12px; font-size: 1.05rem; color: var(--brand-dark);">
+                    <i class="fa-solid fa-users" aria-hidden="true"></i> Gestione Utenti
+                </h2>
+                <form method="post">
+                    <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
+                    <input type="hidden" name="azione" value="salva_utente">
+                    <div class="field-group" style="margin-bottom: 10px;">
+                        <label class="field-label">Username</label>
+                        <input class="form-control" type="text" name="new_username" required placeholder="es. mario">
+                    </div>
+                    <div class="field-group" style="margin-bottom: 10px;">
+                        <label class="field-label">Password</label>
+                        <input class="form-control" type="password" name="new_password" required placeholder="Nuova password">
+                    </div>
+                    <div class="field-group" style="margin-bottom: 12px;">
+                        <label class="field-label">Ruolo</label>
+                        <select class="form-control" name="livello">
+                            <option value="1">Utente standard</option>
+                            <option value="0">Amministratore</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Salva Utente</button>
+                </form>
+            </section>
         </div>
-    </div>
+    </main>
 
     <script>
     const CSRF_TOKEN = <?= json_encode($_SESSION['csrf_token']) ?>;
@@ -497,9 +488,10 @@ ksort($tratteMap);
     function mostraStato(el, ok, msg) {
         if (!el) return;
         el.textContent = msg;
-        el.className = 'status-pill ' + (ok ? 'w3-pale-green w3-text-green' : 'w3-pale-red w3-text-red');
+        el.style.background = ok ? 'var(--success-bg)' : 'var(--danger-bg)';
+        el.style.color = ok ? 'var(--success-text)' : 'var(--danger-text)';
         if (ok) {
-            setTimeout(() => { el.textContent = ''; el.className = 'status-pill'; }, 2500);
+            setTimeout(() => { el.textContent = ''; el.style.background = 'transparent'; }, 2500);
         }
     }
 
@@ -508,22 +500,15 @@ ksort($tratteMap);
         const orario = document.getElementById('ora-' + id).value;
         const badge = document.getElementById('status-' + id);
 
-        badge.textContent = 'Salvataggio...';
-        badge.className = 'status-pill w3-light-grey';
-
+        badge.textContent = '...';
         const body = new URLSearchParams({
-            ajax: '1',
-            csrf_token: CSRF_TOKEN,
-            azione: 'update_orario',
-            id: id,
-            idLuogo: idLuogo,
-            orario: orario
+            ajax: '1', csrf_token: CSRF_TOKEN, azione: 'update_orario', id, idLuogo, orario
         });
 
         try {
             const res = await fetch('admin.php', { method: 'POST', body });
             const data = await res.json();
-            mostraStato(badge, data.ok, data.ok ? 'Salvato ✓' : (data.error || 'Errore'));
+            mostraStato(badge, data.ok, data.ok ? 'Salvato' : (data.error || 'Errore'));
         } catch (e) {
             mostraStato(badge, false, 'Errore rete');
         }
@@ -532,18 +517,13 @@ ksort($tratteMap);
     async function salvaNota(tratta, tipo, note) {
         const badge = document.getElementById('nota-status-' + tratta);
         const body = new URLSearchParams({
-            ajax: '1',
-            csrf_token: CSRF_TOKEN,
-            azione: 'update_nota',
-            tratta: tratta,
-            tipo: tipo,
-            note: note
+            ajax: '1', csrf_token: CSRF_TOKEN, azione: 'update_nota', tratta, tipo, note
         });
 
         try {
             const res = await fetch('admin.php', { method: 'POST', body });
             const data = await res.json();
-            mostraStato(badge, data.ok, data.ok ? 'Nota salvata ✓' : 'Errore');
+            mostraStato(badge, data.ok, data.ok ? 'Nota salvata' : 'Errore');
         } catch (e) {
             mostraStato(badge, false, 'Errore rete');
         }
@@ -551,20 +531,15 @@ ksort($tratteMap);
 
     async function eliminaRigaOrario(id) {
         if (!confirm('Rimuovere questa fermata dalla tratta?')) return;
-
         const body = new URLSearchParams({
-            ajax: '1',
-            csrf_token: CSRF_TOKEN,
-            azione: 'delete_orario',
-            id: id
+            ajax: '1', csrf_token: CSRF_TOKEN, azione: 'delete_orario', id
         });
 
         try {
             const res = await fetch('admin.php', { method: 'POST', body });
             const data = await res.json();
             if (data.ok) {
-                const row = document.getElementById('row-orario-' + id);
-                if (row) row.remove();
+                document.getElementById('row-orario-' + id)?.remove();
             } else {
                 alert('Errore durante l\'eliminazione.');
             }
@@ -574,4 +549,13 @@ ksort($tratteMap);
     }
     </script>
 
-    <?php include_once 'footer.php'; ?>
+    <footer class="app-footer" style="margin-top: 24px;">
+        <div class="footer-inner">
+            <nav class="footer-links">
+                <a href="home.php">Torna all'App</a>
+                <a href="logout.php">Esci</a>
+            </nav>
+        </div>
+    </footer>
+</body>
+</html>

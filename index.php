@@ -9,7 +9,7 @@ if (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) {
 
 $errorMsg = "";
 if (isset($_GET['redirect']) && $_GET['redirect'] === 'home') {
-    $errorMsg = "Sessione scaduta o accesso non autorizzato.<br>Effettua nuovamente il login.";
+    $errorMsg = "Sessione scaduta o accesso non autorizzato. Effettua nuovamente il login.";
 }
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
@@ -61,78 +61,84 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <title>Login - ShuttleX</title>
-    <link rel="manifest" href="manifest.json">
+    <title>Accedi - ShuttleX</title>
+    <meta name="robots" content="noindex, nofollow">
     <?php include_once 'styles/header-include.php'; ?>
 </head>
 <body>
-    <nav>
-        <div class="pure-g" style="align-items: center;">
-            <div class="pure-u-1-2">
-                <a href="index.php" style="text-decoration: none;">
-                    <h2 class="c-margin-not" style="margin-top:0;">SX</h2>
+    <header class="app-header">
+        <div class="container">
+            <div class="topbar" style="margin-bottom: 0;">
+                <a href="index.php" class="brand-logo">
+                    <i class="fa-solid fa-bus-simple" aria-hidden="true"></i>
+                    <span>SX <span class="sub">ShuttleX</span></span>
                 </a>
-            </div>
-            <div class="pure-u-1-2" style="text-align: right;">
-                <p class="c-margin-not" style="color: #666; margin-top:0;">
-                    <?= date('d/m/Y') ?>
-                </p>
+                <span class="status-meta"><?= date('d/m/Y') ?></span>
             </div>
         </div>
-    </nav>
+    </header>
 
     <?php include_once 'manutenzione.php'; ?>
 
-    <div class="w3-container" style="max-width: 500px; margin: auto; padding-top: 32px;">
-        <div class="w3-panel w3-card-4 w3-white w3-round-large w3-padding-16">
-            <h3 class="w3-center c-primary">
-                <i class="fa-solid fa-user-lock"></i> Area Riservata
-            </h3>
-            <hr>
+    <main id="main-content" class="container" style="max-width: 480px;">
+        <section class="card" aria-labelledby="login-heading">
+            <h1 id="login-heading" style="margin: 0 0 6px; font-size: 1.35rem; color: var(--brand-dark);">
+                <i class="fa-solid fa-user-lock" aria-hidden="true"></i> Area Riservata
+            </h1>
+            <p style="margin: 0 0 18px; color: var(--text-muted); font-size: 0.9rem;">
+                Accedi per consultare gli orari aggiornati della navetta CampusX.
+            </p>
+
             <?php if (!empty($errorMsg)): ?>
-                <div class="w3-panel w3-red w3-display-container w3-round w3-animate-opacity">
-                    <span onclick="this.parentElement.style.display='none'" class="w3-button w3-red w3-large w3-display-topright">&times;</span>
-                    <p><?= $errorMsg ?></p>
+                <div class="alert alert-danger" role="alert">
+                    <i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>
+                    <?= htmlspecialchars($errorMsg) ?>
                 </div>
             <?php endif; ?>
 
-            <form method="POST" action="<?= htmlspecialchars($_SERVER["PHP_SELF"]) ?>" class="w3-container">
-                <div class="w3-row w3-margin-bottom">
-                    <label class="w3-text-grey"><b>Username</b></label>
-                    <div class="w3-col s1 w3-center w3-padding-small">
-                        <i class="fa-solid fa-user w3-large w3-text-grey"></i>
-                    </div>
-                    <div class="w3-col s11">
-                        <input class="w3-input w3-border w3-round" type="text" name="username" required autocomplete="username" placeholder="Inserisci il tuo username">
+            <form method="POST" action="<?= htmlspecialchars($_SERVER["PHP_SELF"]) ?>">
+                <div class="field-group" style="margin-bottom: 14px;">
+                    <label for="username" class="field-label">Username</label>
+                    <input id="username" class="form-control" type="text" name="username" required autocomplete="username" placeholder="Inserisci il tuo username">
+                </div>
+
+                <div class="field-group" style="margin-bottom: 18px;">
+                    <label for="password" class="field-label">Password</label>
+                    <div style="position: relative;">
+                        <input id="password" class="form-control" type="password" name="password" required autocomplete="current-password" placeholder="Inserisci la tua password" style="padding-right: 46px;">
+                        <button type="button"
+                                onclick="togglePass()"
+                                aria-label="Mostra o nascondi password"
+                                style="position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; width: 38px; height: 38px;">
+                            <i id="eyeIcon" class="fa-regular fa-eye" aria-hidden="true"></i>
+                        </button>
                     </div>
                 </div>
 
-                <div class="w3-row w3-margin-bottom">
-                    <label class="w3-text-grey"><b>Password</b></label>
-                    <div class="w3-col s1 w3-center w3-padding-small">
-                        <i class="fa-solid fa-key w3-large w3-text-grey"></i>
-                    </div>
-                    <div class="w3-col s11">
-                        <input class="w3-input w3-border w3-round" type="password" name="password" required autocomplete="current-password" placeholder="Inserisci la tua password">
-                    </div>
-                </div>
-
-                <p class="w3-center w3-padding-16">
-                    <button class="w3-button w3-block w3-blue w3-round w3-hover-light-blue w3-card-2" type="submit">
-                        ACCEDI
-                    </button>
-                </p>
-
-                <h4 class="w3-center c-primary">
-                    <i class="fa-regular fa-envelope"></i>
-                    <a href="mailto:<?= htmlspecialchars($mailAssistenza) ?>?subject=Richiesta%20credenziali%20ShuttleX">
-                        Richiedi Credenziali / Assistenza
-                    </a>
-                </h4>
+                <button class="btn btn-primary" type="submit" style="width: 100%; font-size: 1rem;">
+                    Accedi <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+                </button>
             </form>
-        </div>
+
+            <div style="text-align: center; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);">
+                <a href="mailto:<?= htmlspecialchars($mailAssistenza) ?>?subject=Richiesta%20credenziali%20ShuttleX"
+                   style="color: var(--brand-dark); font-weight: 600; font-size: 0.9rem; text-decoration: none;">
+                    <i class="fa-regular fa-envelope" aria-hidden="true"></i> Non hai le credenziali? Richiedile qui
+                </a>
+            </div>
+        </section>
 
         <?php include_once 'components/disclaimer-box.php'; ?>
-    </div>
+    </main>
+
+    <script>
+    function togglePass() {
+        const inp = document.getElementById('password');
+        const icon = document.getElementById('eyeIcon');
+        const show = inp.type === 'password';
+        inp.type = show ? 'text' : 'password';
+        icon.className = show ? 'fa-regular fa-eye-slash' : 'fa-regular fa-eye';
+    }
+    </script>
 </body>
 </html>

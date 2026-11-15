@@ -8,26 +8,23 @@ if (isset($sxConn) && $sxConn instanceof mysqli) {
     }
 }
 ?>
-<div class="pure-g" style="margin-top: 24px;">
-    <div class="pure-u-1-1 c-footer" style="padding: 16px;">
-        <h4 style="margin: 4px 0;">Aggiornato al <?= htmlspecialchars($ultimaModificaDB) ?></h4>
-        <h4 style="margin: 8px 0; font-size: 0.95em;">
-            Credits: <a href="https://www.cx-place.com/it/campus-cxbari.html" target="_blank" rel="noopener">CampusX - Bari</a>
-            <br><br>
-            <?php if (function_exists('isAdmin') && isAdmin()): ?>
-                <a href="admin.php" class="w3-tag w3-pink w3-round" style="color: white !important; margin-right: 12px;">
-                    <i class="fa-solid fa-sliders"></i> PANNELLO ADMIN
-                </a>
-            <?php endif; ?>
-            <a href="mailto:<?= htmlspecialchars($mailAssistenza ?? 'bellamiaantonio@protonmail.com') ?>?subject=Richiesta%20assistenza%20ShuttleX">
-                Assistenza
-            </a>
-            &nbsp;&nbsp;&nbsp;
-            <a href="disclaimer.php">Condizioni d'uso</a>
-            &nbsp;&nbsp;&nbsp;
-            <a href="logout.php">LOGOUT</a>
-        </h4>
-    </div>
-</div>
+    </main>
+
+    <footer class="app-footer">
+        <div class="footer-inner">
+            <div>
+                Orari aggiornati al <strong><?= htmlspecialchars($ultimaModificaDB) ?></strong> &middot;
+                Credits: <a href="https://www.cx-place.com/it/campus-cxbari.html" target="_blank" rel="noopener">CampusX Bari</a>
+            </div>
+            <nav class="footer-links" aria-label="Link di servizio">
+                <?php if (function_exists('isAdmin') && isAdmin()): ?>
+                    <a href="admin.php"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Pannello Admin</a>
+                <?php endif; ?>
+                <a href="mailto:<?= htmlspecialchars($mailAssistenza ?? 'bellamiaantonio@protonmail.com') ?>?subject=Richiesta%20assistenza%20ShuttleX">Assistenza</a>
+                <a href="disclaimer.php">Condizioni d'uso</a>
+                <a href="logout.php">Esci</a>
+            </nav>
+        </div>
+    </footer>
 </body>
 </html>
